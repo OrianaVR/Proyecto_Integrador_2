@@ -201,7 +201,16 @@ app.get('/api', (_req, res) => res.json({
 }));
 
 app.get('/api/health', (_req,res)=>ok(res,{status:'ok',service:'motoleasing-backend',timestamp:new Date().toISOString()}));
-app.use((err,_req,res,_next)=>{ console.error(err); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?'El comprobante no puede superar los 5 MB':'El archivo del comprobante no es válido'); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,'El comprobante debe ser un archivo PDF, JPG o PNG'); fail(res,500,err.message || 'Error interno del servidor'); });
+const BUSINESS_ERRORS = {
+  EMAIL_EXISTS: [409, 'Ya existe un cliente registrado con ese correo'],
+  DOC_EXISTS: [409, 'Ya existe un cliente registrado con ese documento'],
+  PLATE_EXISTS: [409, 'Ya existe una motocicleta registrada con esa placa'],
+  GPS_EXISTS: [409, 'Ese dispositivo GPS ya está asignado a otra motocicleta'],
+  FEE_EXISTS: [409, 'Ya existe una cuota con ese número para este contrato'],
+  CONTRACT_NOT_FOUND: [404, 'Contrato no encontrado'],
+  INVALID_AMOUNT: [400, 'El monto debe ser un número mayor que cero'],
+};
+app.use((err,_req,res,_next)=>{ console.error(err); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?'El comprobante no puede superar los 5 MB':'El archivo del comprobante no es válido'); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); fail(res,500,'Error interno del servidor'); });
 
 app.listen(PORT, async ()=>{ console.log(`MotoLeasing API escuchando en http://localhost:${PORT}`); try { if (readDb().usuarios.length === 0) await seed(); console.log('Jobs iniciales:', await runJobs()); } catch(e){ console.error('No se pudieron ejecutar jobs iniciales:',e.message); } });
 setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
