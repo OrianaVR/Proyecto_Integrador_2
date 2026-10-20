@@ -34,8 +34,8 @@ export default function RiderMiEstadoPage() {
 
   if (!data) return <div className="min-h-screen bg-[#141414] flex items-center justify-center text-white">{error || 'Cargando…'}</div>;
 
-  const progreso = Math.round((contrato.cuotasPagadas / contrato.cuotasTotales) * 100);
-  const color    = scoreColors[score.categoria];
+  const progreso = contrato.cuotasTotales ? Math.round((contrato.cuotasPagadas / contrato.cuotasTotales) * 100) : 0;
+  const color    = score ? scoreColors[score.categoria] : '#A0A0A0';
 
   return (
     <main className="min-h-screen bg-[#141414]">
@@ -130,6 +130,7 @@ export default function RiderMiEstadoPage() {
         {/* Score */}
         <div className="rounded-2xl border bg-[#1F1F1F]/60 p-5 space-y-3" style={{ borderColor: `${color}30` }}>
           <p className="text-xs font-semibold text-[#666666] uppercase tracking-wider">Mi Score Crediticio</p>
+          {score ? (<>
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-2xl flex items-center justify-center border-2 shrink-0" style={{ borderColor: `${color}40`, backgroundColor: `${color}15` }}>
               <span className="text-2xl font-black" style={{ color }}>{score.puntaje}</span>
@@ -147,6 +148,9 @@ export default function RiderMiEstadoPage() {
             {score.tendencia === 'subiendo' ? <TrendingUp className="w-3.5 h-3.5" /> : score.tendencia === 'bajando' ? <TrendingDown className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
             Tendencia {score.tendencia} · {score.porcentajePuntual}% de cuotas a tiempo
           </div>
+          </>) : (
+            <p className="text-sm text-[#666666]">Aún no tienes score, se calculará con tu primer pago.</p>
+          )}
         </div>
 
         {/* Historial reciente */}

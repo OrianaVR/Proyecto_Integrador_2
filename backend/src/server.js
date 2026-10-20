@@ -22,7 +22,8 @@ const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
+const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_req, file, cb) => ALLOWED_TYPES.includes(file.mimetype) ? cb(null, true) : cb(new Error('INVALID_FILE_TYPE')) });
 
 app.use(cors({ origin: process.env.FRONTEND_URL || true, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
@@ -102,12 +103,14 @@ app.post('/api/clientes', authenticate, authorize('admin'), (req,res)=>{
     if(db.clientes.some(c=>c.email.toLowerCase()===String(body.email).toLowerCase())) throw new Error('EMAIL_EXISTS');
     if(db.clientes.some(c=>c.documentoId===String(body.documentoId))) throw new Error('DOC_EXISTS');
     if(db.motocicletas.some(m=>m.placa===String(body.placa).toUpperCase())) throw new Error('PLATE_EXISTS');
+    if(body.dispositivoGPS && db.motocicletas.some(m=>m.dispositivoGPS===String(body.dispositivoGPS))) throw new Error('GPS_EXISTS');
     const clienteId=id('c'), motoId=id('m'), contratoId=id('ct');
     const cliente={id:clienteId,nombre:body.nombre,apellido:body.apellido,email:body.email,telefono:body.telefono,documentoId:String(body.documentoId),plataforma:body.plataforma,fechaRegistro:new Date().toISOString().slice(0,10),rol:'rider',activo:true,ciudad:body.ciudad};
     const moto={id:motoId,marca:body.marca,modelo:body.modelo,año:Number(body.año),placa:String(body.placa).toUpperCase(),numeroSerie:body.numeroSerie,color:body.color,estadoGPS:'apagado',dispositivoGPS:body.dispositivoGPS||null,disponible:true,clienteId:clienteId,creadoEn:new Date().toISOString(),vencimientoSOAT:body.vencimientoSOAT||null,vencimientoTecno:body.vencimientoTecno||null,documentos:[]};
     const monto=Number(body.montoSemanal), cuotas=Number(body.cuotasTotales), total=monto*cuotas;
     const contrato={id:contratoId,clienteId,motocicletaId:motoId,estado:'activo',fechaInicio:body.fechaInicio,fechaFin:body.fechaFin,montoSemanal:monto,totalContrato:total,saldoPendiente:total,cuotasTotales:cuotas,cuotasPagadas:0,observaciones:body.observaciones||null,creadoEn:new Date().toISOString(),actualizadoEn:new Date().toISOString()};
     db.clientes.push(cliente); db.motocicletas.push(moto); db.contratos.push(contrato);
+    db.scores.push({...calculateScore([]),clienteId,cuotasPagadas:0,cuotasTotales:cuotas,ultimaActualizacion:new Date().toISOString().slice(0,10)});
     return {cliente,moto,contrato};
   });
   ok(res,result,'Cliente, motocicleta y contrato registrados');
@@ -121,6 +124,7 @@ app.post('/api/cuotas/calcular-total', authenticate, authorize('admin'), (req,re
 
 app.post('/api/cuotas', authenticate, authorize('admin'), async (req,res)=>{
   const { contratoId, numeroCuota, monto, fechaVencimiento }=req.body; const missing=validateRequired(req.body,['contratoId','numeroCuota','monto','fechaVencimiento']); if(missing) return fail(res,400,`El campo ${missing} es obligatorio`);
+  if(!Number.isFinite(Number(monto))||Number(monto)<=0) return fail(res,400,'El monto debe ser un número mayor que cero');
   const result=updateDb(db=>{
     const contrato=db.contratos.find(c=>c.id===contratoId); if(!contrato) throw new Error('CONTRACT_NOT_FOUND');
     if(db.cuotas.some(c=>c.contratoId===contratoId && c.numeroCuota===Number(numeroCuota))) throw new Error('FEE_EXISTS');
@@ -198,7 +202,16 @@ app.get('/api', (_req, res) => res.json({
 }));
 
 app.get('/api/health', (_req,res)=>ok(res,{status:'ok',service:'motoleasing-backend',timestamp:new Date().toISOString()}));
-app.use((err,_req,res,_next)=>{ console.error(err); fail(res,500,err.message || 'Error interno del servidor'); });
+const BUSINESS_ERRORS = {
+  EMAIL_EXISTS: [409, 'Ya existe un cliente registrado con ese correo'],
+  DOC_EXISTS: [409, 'Ya existe un cliente registrado con ese documento'],
+  PLATE_EXISTS: [409, 'Ya existe una motocicleta registrada con esa placa'],
+  GPS_EXISTS: [409, 'Ese dispositivo GPS ya está asignado a otra motocicleta'],
+  FEE_EXISTS: [409, 'Ya existe una cuota con ese número para este contrato'],
+  CONTRACT_NOT_FOUND: [404, 'Contrato no encontrado'],
+  INVALID_AMOUNT: [400, 'El monto debe ser un número mayor que cero'],
+};
+app.use((err,_req,res,_next)=>{ console.error(err); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?'El comprobante no puede superar los 5 MB':'El archivo del comprobante no es válido'); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); fail(res,500,'Error interno del servidor'); });
 
 app.listen(PORT, async ()=>{ console.log(`MotoLeasing API escuchando en http://localhost:${PORT}`); try { if (readDb().usuarios.length === 0) await seed(); console.log('Jobs iniciales:', await runJobs()); } catch(e){ console.error('No se pudieron ejecutar jobs iniciales:',e.message); } });
 setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);

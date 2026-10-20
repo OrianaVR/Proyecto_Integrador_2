@@ -80,10 +80,10 @@ export default function NuevoClientePage() {
     try {
       await createClient({ ...cliente, ...moto, año: Number(moto.año), montoSemanal: Number(moto.montoSemanal), cuotasTotales: Number(moto.cuotasTotales) });
       setDone(true);
+      setTimeout(() => router.push('/admin/dashboard'), 1500);
     } catch (e: any) {
       alert(e.response?.data?.error || e.message || 'No se pudo registrar el cliente');
     } finally { setSaving(false); }
-    setTimeout(() => router.push('/admin/dashboard'), 1500);
   };
 
   if (done) return (
