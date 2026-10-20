@@ -110,6 +110,7 @@ app.post('/api/clientes', authenticate, authorize('admin'), (req,res)=>{
     const monto=Number(body.montoSemanal), cuotas=Number(body.cuotasTotales), total=monto*cuotas;
     const contrato={id:contratoId,clienteId,motocicletaId:motoId,estado:'activo',fechaInicio:body.fechaInicio,fechaFin:body.fechaFin,montoSemanal:monto,totalContrato:total,saldoPendiente:total,cuotasTotales:cuotas,cuotasPagadas:0,observaciones:body.observaciones||null,creadoEn:new Date().toISOString(),actualizadoEn:new Date().toISOString()};
     db.clientes.push(cliente); db.motocicletas.push(moto); db.contratos.push(contrato);
+    db.scores.push({...calculateScore([]),clienteId,cuotasPagadas:0,cuotasTotales:cuotas,ultimaActualizacion:new Date().toISOString().slice(0,10)});
     return {cliente,moto,contrato};
   });
   ok(res,result,'Cliente, motocicleta y contrato registrados');
