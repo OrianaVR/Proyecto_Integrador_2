@@ -55,7 +55,7 @@ function autoShutdownMotos() {
       const maxMora = cuotasMora.reduce((max, c) => Math.max(max, c.diasMorosidad || 0), 0);
       if (maxMora < threshold) continue;
       const moto = db.motocicletas.find(m => m.id === contrato.motocicletaId);
-      if (!moto || moto.estadoGPS === 'apagado') continue;
+      if (!moto || moto.estadoGPS === 'apagado' || moto.estadoGPS === 'sin_señal') continue;
       moto.estadoGPS = 'apagado';
       moto.disponible = false;
       const command = { id: `gps-${Date.now()}-${moto.id}`, motocicletaId: moto.id, accion: 'apagar', solicitadoPor: 'system-auto', timestamp: now, resultado: 'exitoso' };
