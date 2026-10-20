@@ -121,6 +121,7 @@ app.post('/api/cuotas/calcular-total', authenticate, authorize('admin'), (req,re
 
 app.post('/api/cuotas', authenticate, authorize('admin'), async (req,res)=>{
   const { contratoId, numeroCuota, monto, fechaVencimiento }=req.body; const missing=validateRequired(req.body,['contratoId','numeroCuota','monto','fechaVencimiento']); if(missing) return fail(res,400,`El campo ${missing} es obligatorio`);
+  if(!Number.isFinite(Number(monto))||Number(monto)<=0) return fail(res,400,'El monto debe ser un número mayor que cero');
   const result=updateDb(db=>{
     const contrato=db.contratos.find(c=>c.id===contratoId); if(!contrato) throw new Error('CONTRACT_NOT_FOUND');
     if(db.cuotas.some(c=>c.contratoId===contratoId && c.numeroCuota===Number(numeroCuota))) throw new Error('FEE_EXISTS');
