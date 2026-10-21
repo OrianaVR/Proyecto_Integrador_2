@@ -9,7 +9,7 @@ function signToken(user) {
 
 function authenticate(req, res, next) {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const token = header.startsWith('Bearer ') ? header.slice(7) : (req.query?.token || null);
   if (!token) return res.status(401).json({ success: false, error: 'Token requerido' });
   try {
     const payload = jwt.verify(token, SECRET);

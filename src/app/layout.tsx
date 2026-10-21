@@ -20,7 +20,7 @@ export const metadata: Metadata = {
   keywords: ["leasing", "motocicletas", "riders", "rappi", "didi", "gig economy"],
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="es"

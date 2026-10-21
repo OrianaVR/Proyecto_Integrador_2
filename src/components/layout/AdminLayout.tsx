@@ -5,17 +5,18 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
   LayoutDashboard, Users, Bike, AlertTriangle, UserPlus,
-  LogOut, Menu, X, Zap, ChevronRight,
+  LogOut, Menu, X, Zap, ChevronRight, BarChart3,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { cn } from '@/lib/utils';
 
 const NAV_ITEMS = [
-  { href: '/admin/dashboard',      label: 'Dashboard',         icon: LayoutDashboard },
-  { href: '/admin/clientes',       label: 'Clientes',          icon: Users },
-  { href: '/admin/clientes/nuevo', label: 'Nuevo Cliente',     icon: UserPlus },
-  { href: '/admin/motocicletas',   label: 'Motocicletas',      icon: Bike },
-  { href: '/admin/desactivaciones', label: 'Desactivaciones',  icon: AlertTriangle },
+  { href: '/admin/dashboard',       label: 'Dashboard',            icon: LayoutDashboard },
+  { href: '/admin/reportes',        label: 'Reportes Financieros', icon: BarChart3 },
+  { href: '/admin/clientes',        label: 'Clientes',             icon: Users },
+  { href: '/admin/clientes/nuevo',  label: 'Nuevo Cliente',        icon: UserPlus },
+  { href: '/admin/motocicletas',    label: 'Motocicletas',         icon: Bike },
+  { href: '/admin/desactivaciones', label: 'Desactivaciones',      icon: AlertTriangle },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {

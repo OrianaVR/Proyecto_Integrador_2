@@ -52,18 +52,69 @@ async function seed() {
 
   const amounts = { ct1:180000,ct2:200000,ct3:175000,ct4:190000,ct5:210000,ct6:185000,ct7:170000,ct8:195000 };
   const paid = { ct1:16,ct2:14,ct3:12,ct4:15,ct5:11,ct6:10,ct7:13,ct8:13 };
+  const today = new Date();
+
   for (const c of db.contratos) {
     for (let i=1;i<=c.cuotasTotales;i++) {
       const base = new Date(c.fechaInicio); base.setDate(base.getDate() + (i-1)*7);
-      const fechaVencimiento = base.toISOString().slice(0,10);
+      let fechaVencimiento = base.toISOString().slice(0,10);
       const isPaid = i <= paid[c.id];
-      db.cuotas.push({ id:`cuota-${c.id}-${i}`, contratoId:c.id, numeroCuota:i, monto:amounts[c.id], fechaVencimiento, fechaPago:isPaid ? d(fechaVencimiento, -1) : null, estado:isPaid?'pagado':'pendiente', diasMorosidad:isPaid?0:0, referencia:null });
+      let fechaPago = isPaid ? d(fechaVencimiento, -1) : null;
+
+      // Asignar fechas recientes a las últimas cuotas pagadas para reflejar periodo actual/mensual
+      if (isPaid) {
+        const offsetFromLast = paid[c.id] - i;
+        if (offsetFromLast === 0) {
+          fechaPago = d(today, -3);
+          fechaVencimiento = d(today, -2);
+        } else if (offsetFromLast === 1) {
+          fechaPago = d(today, -10);
+          fechaVencimiento = d(today, -9);
+        } else if (offsetFromLast === 2) {
+          fechaPago = d(today, -17);
+          fechaVencimiento = d(today, -16);
+        } else if (offsetFromLast === 3) {
+          fechaPago = d(today, -24);
+          fechaVencimiento = d(today, -23);
+        } else if (offsetFromLast === 4) {
+          fechaPago = d(today, -31);
+          fechaVencimiento = d(today, -30);
+        }
+      }
+
+      db.cuotas.push({
+        id: `cuota-${c.id}-${i}`,
+        contratoId: c.id,
+        numeroCuota: i,
+        monto: amounts[c.id],
+        fechaVencimiento,
+        fechaPago,
+        estado: isPaid ? 'pagado' : 'pendiente',
+        diasMorosidad: 0,
+        referencia: isPaid ? `REC-${c.id.toUpperCase()}-${String(i).padStart(3, '0')}` : null,
+      });
+
+      if (isPaid) {
+        const metodos = ['transferencia', 'nequi', 'daviplata', 'efectivo', 'tarjeta'];
+        const metodoPago = metodos[(i + c.id.charCodeAt(2)) % metodos.length];
+        db.pagos.push({
+          id: `pago-${c.id}-${i}`,
+          contratoId: c.id,
+          cuotaId: `cuota-${c.id}-${i}`,
+          clienteId: c.clienteId,
+          monto: amounts[c.id],
+          metodoPago,
+          referencia: `REC-${c.id.toUpperCase()}-${String(i).padStart(3, '0')}`,
+          comprobante: null,
+          registradoPor: 'admin-1',
+          fechaPago: `${fechaPago}T11:00:00.000Z`,
+          notas: `Pago de cuota #${i}`,
+        });
+      }
     }
   }
+
   // Fechas relativas para que el backend sea demostrable al ejecutarlo en cualquier momento.
-  // Las cuotas pagadas quedan históricas; la próxima cuota de cada contrato queda futura,
-  // excepto c3/c5/c6, que conservan mora para demostrar HU-17.
-  const today = new Date();
   for (const c of db.contratos) {
     const unpaid = db.cuotas.filter(q => q.contratoId === c.id && q.numeroCuota > paid[c.id]);
     unpaid.forEach((q, index) => { q.fechaVencimiento = d(today, 3 + index * 7); });
@@ -86,6 +137,7 @@ async function seed() {
     {id:'ad2',clienteId:'c5',motocicletaId:'m5',motivo:'mora',diasMora:27,fechaProgramada:new Date(Date.now()+86400000).toISOString(),urgencia:'alta',atendida:false},
     {id:'ad3',clienteId:'c3',motocicletaId:'m3',motivo:'mora',diasMora:14,fechaProgramada:new Date(Date.now()+2*86400000).toISOString(),urgencia:'media',atendida:false},
   ];
+  db.configuracion_notificacion = [{ id: 'conf-1', diaSemana: 0, hora: 0 }];
   writeDb(db);
   console.log('Base de datos del MVP creada correctamente.');
 }

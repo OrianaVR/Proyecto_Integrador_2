@@ -9,8 +9,9 @@ const { readDb, updateDb, ensureDb } = require('./db');
 const { signToken, authenticate, authorize } = require('./auth');
 const { id, addDays, daysBetween, calculateScore } = require('./utils');
 const { createNotification } = require('./notifications');
-const { runJobs } = require('./jobs');
+const { runJobs, processAutomaticCollection } = require('./jobs');
 const { seed } = require('./seed');
+const { generarReporteFinanciero, exportarReportePDF, exportarReporteExcel } = require('./reports');
 
 ensureDb();
 const app = express();
@@ -47,7 +48,7 @@ function clienteDetalle(db, clienteId) {
   const cuotas = contrato ? db.cuotas.filter(c => c.contratoId === contrato.id) : [];
   const proximaCuota = cuotas.find(c => c.estado === 'pendiente') || cuotas.find(c => c.estado === 'vencido') || null;
   const diasMora = cuotas.reduce((max, c) => Math.max(max, c.diasMorosidad || 0), 0);
-  return { cliente, motocicleta, contrato, score, diasMora, proximaCuota, historial: cuotas.map(c => ({ cuotaId:c.id, numeroCuota:c.numeroCuota, monto:c.monto, fechaVencimiento:c.fechaVencimiento, fechaPago:c.fechaPago, estado:c.estado, diasDiferencia:c.fechaPago ? Math.round((new Date(c.fechaPago)-new Date(c.fechaVencimiento))/86400000) : c.diasMorosidad || 0 })) };
+  return { cliente, motocicleta, contrato, score, diasMora, proximaCuota, historial: cuotas.map(c => ({ cuotaId:c.id, numeroCuota:c.numeroCuota, monto:c.monto, montoBase:c.montoBase, montoMultas:c.montoMultas, montoExcedentes:c.montoExcedentes, fechaVencimiento:c.fechaVencimiento, fechaPago:c.fechaPago, estado:c.estado, diasDiferencia:c.fechaPago ? Math.round((new Date(c.fechaPago)-new Date(c.fechaVencimiento))/86400000) : c.diasMorosidad || 0 })) };
 }
 
 // ───────────────────────────────── AUTH ─────────────────────────────────────
@@ -128,7 +129,7 @@ app.post('/api/cuotas', authenticate, authorize('admin'), async (req,res)=>{
   const result=updateDb(db=>{
     const contrato=db.contratos.find(c=>c.id===contratoId); if(!contrato) throw new Error('CONTRACT_NOT_FOUND');
     if(db.cuotas.some(c=>c.contratoId===contratoId && c.numeroCuota===Number(numeroCuota))) throw new Error('FEE_EXISTS');
-    const cuota={id:id('cuota'),contratoId,numeroCuota:Number(numeroCuota),monto:Number(monto),fechaVencimiento,fechaPago:null,estado:'pendiente',diasMorosidad:0,referencia:null}; db.cuotas.push(cuota); contrato.cuotasTotales=Math.max(contrato.cuotasTotales,Number(numeroCuota)); contrato.totalContrato=contrato.montoSemanal*contrato.cuotasTotales; contrato.saldoPendiente += Number(monto); contrato.actualizadoEn=new Date().toISOString(); return cuota;
+    const cuota={id:id('cuota'),contratoId,numeroCuota:Number(numeroCuota),monto:Number(monto),montoBase:Number(monto),montoMultas:0,montoExcedentes:0,fechaVencimiento,fechaPago:null,estado:'pendiente',diasMorosidad:0,referencia:null}; db.cuotas.push(cuota); contrato.cuotasTotales=Math.max(contrato.cuotasTotales,Number(numeroCuota)); contrato.totalContrato=contrato.montoSemanal*contrato.cuotasTotales; contrato.saldoPendiente += Number(monto); contrato.actualizadoEn=new Date().toISOString(); return cuota;
   });
   const contrato=readDb().contratos.find(c=>c.id===contratoId); if(contrato) await createNotification({clienteId:contrato.clienteId,contratoId,cuotaId:result.id,tipo:'cuota_registrada',titulo:'Nueva cuota registrada',mensaje:`Se registró la cuota #${result.numeroCuota} por $${result.monto.toLocaleString('es-CO')}.`});
   ok(res,result,'Cuota semanal registrada');
@@ -186,7 +187,65 @@ app.post('/api/alertas/:id/desactivar', authenticate, authorize('admin'), (req,r
 app.get('/api/notificaciones', authenticate, (req,res)=>{
   const db=readDb(); const clienteId=req.user.rol==='rider'?req.user.clienteId:req.query.clienteId; ok(res,db.notificaciones.filter(n=>!clienteId||n.clienteId===clienteId));
 });
+app.get('/api/notificaciones/cliente/:clienteId', authenticate, (req, res) => {
+  if (req.user.rol === 'rider' && req.user.clienteId !== req.params.clienteId) return fail(res, 403, 'No autorizado');
+  const db = readDb();
+  const notificaciones = (db.notificaciones || []).filter(n => n.clienteId === req.params.clienteId);
+  ok(res, notificaciones);
+});
+app.post('/api/jobs/cobro-automatico', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const fecha = req.body?.fecha || req.query?.fecha || null;
+    const resultado = await processAutomaticCollection(fecha);
+    ok(res, resultado, 'Proceso de cobro automático ejecutado correctamente');
+  } catch (err) {
+    fail(res, 500, err.message);
+  }
+});
 app.post('/api/jobs/run', authenticate, authorize('admin'), async (_req,res)=>ok(res,await runJobs(),'Procesos automáticos ejecutados'));
+
+// ───────────────────────────── REPORTES FINANCIEROS ─────────────────────────
+app.get('/api/reportes/financiero', authenticate, authorize('admin'), (req, res) => {
+  try {
+    const { fechaInicio, fechaFin, periodo } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return fail(res, 400, 'Las fechas de inicio y fin son obligatorias');
+    }
+    const db = readDb();
+    const reporte = generarReporteFinanciero(db, { fechaInicio, fechaFin, periodo });
+    return ok(res, reporte, 'Reporte financiero generado');
+  } catch (err) {
+    return fail(res, 400, err.message);
+  }
+});
+
+app.get('/api/reportes/financiero/pdf', authenticate, authorize('admin'), (req, res) => {
+  try {
+    const { fechaInicio, fechaFin, periodo } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return fail(res, 400, 'Las fechas de inicio y fin son obligatorias');
+    }
+    const db = readDb();
+    const reporte = generarReporteFinanciero(db, { fechaInicio, fechaFin, periodo });
+    exportarReportePDF(reporte, res);
+  } catch (err) {
+    return fail(res, 400, err.message);
+  }
+});
+
+app.get('/api/reportes/financiero/excel', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { fechaInicio, fechaFin, periodo } = req.query;
+    if (!fechaInicio || !fechaFin) {
+      return fail(res, 400, 'Las fechas de inicio y fin son obligatorias');
+    }
+    const db = readDb();
+    const reporte = generarReporteFinanciero(db, { fechaInicio, fechaFin, periodo });
+    await exportarReporteExcel(reporte, res);
+  } catch (err) {
+    return fail(res, 400, err.message);
+  }
+});
 
 app.get('/', (_req, res) => res.json({
   ok: true,
@@ -215,3 +274,19 @@ app.use((err,_req,res,_next)=>{ console.error(err); if(err instanceof multer.Mul
 
 app.listen(PORT, async ()=>{ console.log(`MotoLeasing API escuchando en http://localhost:${PORT}`); try { if (readDb().usuarios.length === 0) await seed(); console.log('Jobs iniciales:', await runJobs()); } catch(e){ console.error('No se pudieron ejecutar jobs iniciales:',e.message); } });
 setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
+// ───────────────────────────── SCHEDULE CRON ───────────────────────────────────
+// Notificación automática de cobro según configuración guardada
+const cron = require('node-cron');
+let notificationTask = null;
+function scheduleNotificationCron() {
+  const cfg = readDb().configuracion_notificacion?.[0] || { diaSemana: 0, hora: 0 };
+  const expr = `${cfg.hora} ${cfg.diaSemana} * * *`;
+  if (notificationTask) notificationTask.stop();
+  notificationTask = cron.schedule(expr, async () => {
+    console.log('Ejecutando proceso automático de cobro (cron) – configurado');
+    try { await processAutomaticCollection(); console.log('Proceso automático de cobro completado'); }
+    catch (err) { console.error('Error en proceso automático de cobro (cron):', err); }
+  });
+}
+// inicializar al levantar el servidor
+scheduleNotificationCron();

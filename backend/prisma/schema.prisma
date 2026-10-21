@@ -1,0 +1,349 @@
+// ==============================================================================
+// Prisma Schema - MotoLeasing Platform (PostgreSQL / Supabase)
+// ==============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────────────── ENUMS ─────────────────────────────────────
+
+enum NotificationChannel {
+  WHATSAPP @map("whatsapp")
+  SMS @map("sms")
+  EMAIL @map("email")
+}
+
+enum RolUsuario {
+  ADMIN @map("admin")
+  RIDER @map("rider")
+}
+
+enum PlataformaGig {
+  RAPPI     @map("rappi")
+  DIDI      @map("didi")
+  UBER_EATS @map("uber_eats")
+  OTRA      @map("otra")
+}
+
+enum EstadoContrato {
+  ACTIVO     @map("activo")
+  SUSPENDIDO @map("suspendido")
+  FINALIZADO @map("finalizado")
+  PENDIENTE  @map("pendiente")
+}
+
+enum EstadoGPS {
+  ENCENDIDO   @map("encendido")
+  APAGADO     @map("apagado")
+  SIN_SENAL   @map("sin_señal")
+  DESCONOCIDO @map("desconocido")
+}
+
+enum EstadoPago {
+  PAGADO    @map("pagado")
+  PENDIENTE @map("pendiente")
+  VENCIDO   @map("vencido")
+  PARCIAL   @map("parcial")
+}
+
+enum MetodoPago {
+  EFECTIVO      @map("efectivo")
+  TRANSFERENCIA @map("transferencia")
+  TARJETA       @map("tarjeta")
+  NEQUI         @map("nequi")
+  DAVIPLATA     @map("daviplata")
+}
+
+enum ScoreCategoria {
+  EXCELENTE @map("excelente")
+  BUENO     @map("bueno")
+  REGULAR   @map("regular")
+  MALO      @map("malo")
+}
+
+enum TendenciaScore {
+  SUBIENDO @map("subiendo")
+  BAJANDO  @map("bajando")
+  ESTABLE  @map("estable")
+}
+
+enum TipoDocumentoVehiculo {
+  CEDULA              @map("cedula")
+  CONTRATO_FIRMADO    @map("contrato_firmado")
+  SOAT                @map("soat")
+  TECNOMECANICA       @map("tecnomecanica")
+  TARJETA_PROPIEDAD   @map("tarjeta_propiedad")
+  LICENCIA_CONDUCCION @map("licencia_conduccion")
+  FOTO_MOTO           @map("foto_moto")
+}
+
+enum MotivoAlerta {
+  MORA                 @map("mora")
+  VENCIMIENTO_CONTRATO @map("vencimiento_contrato")
+  SOLICITUD_MANUAL     @map("solicitud_manual")
+}
+
+enum UrgenciaAlerta {
+  ALTA  @map("alta")
+  MEDIA @map("media")
+  BAJA  @map("baja")
+}
+
+enum AccionGPS {
+  ENCENDER @map("encender")
+  APAGAR   @map("apagar")
+}
+
+enum ResultadoComando {
+  EXITOSO   @map("exitoso")
+  FALLIDO   @map("fallido")
+  PENDIENTE @map("pendiente")
+}
+
+// ───────────────────────────────── MODELOS ───────────────────────────────────
+
+model Usuario {
+  id            String     @id @default(uuid())
+  email         String     @unique
+  passwordHash  String     @map("password_hash")
+  rol           RolUsuario @default(RIDER)
+  clienteId     String?    @unique @map("cliente_id")
+  activo        Boolean    @default(true)
+  creadoEn      DateTime   @default(now()) @map("creado_en")
+  actualizadoEn DateTime   @updatedAt @map("actualizado_en")
+
+  // Relaciones
+  cliente             Cliente?     @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  comandosSolicitados ComandoGPS[]
+
+  @@map("usuarios")
+}
+
+model Cliente {
+  canalPreferido NotificationChannel @default(WHATSAPP) @map("canal_preferido")
+  id            String        @id @default(uuid())
+  nombre        String
+  apellido      String
+  email         String        @unique
+  telefono      String
+  documentoId   String        @unique @map("documento_id")
+  plataforma    PlataformaGig
+  ciudad        String?
+  fotoPerfil    String?       @map("foto_perfil")
+  rol           RolUsuario    @default(RIDER)
+  activo        Boolean       @default(true)
+  fechaRegistro DateTime      @default(now()) @map("fecha_registro")
+
+  // Relaciones
+  usuario        Usuario?
+  motocicletas   Motocicleta[]
+  contratos      Contrato[]
+  pagos          Pago[]
+  score          ScoreCredito?
+  alertas        AlertaDesactivacion[]
+  notificaciones Notificacion[]
+
+  @@map("clientes")
+}
+
+model Motocicleta {
+  id               String    @id @default(uuid())
+  marca            String
+  modelo           String
+  anio             Int       @map("anio")
+  placa            String    @unique
+  numeroSerie      String    @map("numero_serie")
+  color            String
+  estadoGPS        EstadoGPS @default(ENCENDIDO) @map("estado_gps")
+  dispositivoGPS   String?   @unique @map("dispositivo_gps")
+  foto             String?
+  disponible       Boolean   @default(true)
+  clienteId        String?   @map("cliente_id")
+  vencimientoSOAT  DateTime? @map("vencimiento_soat")
+  vencimientoTecno DateTime? @map("vencimiento_tecno")
+  creadoEn         DateTime  @default(now()) @map("creado_en")
+  actualizadoEn    DateTime  @updatedAt @map("actualizado_en")
+
+  // Relaciones
+  cliente     Cliente?              @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  contratos   Contrato[]
+  documentos  DocumentoVehiculo[]
+  comandosGPS ComandoGPS[]
+  alertas     AlertaDesactivacion[]
+
+  @@map("motocicletas")
+}
+
+model DocumentoVehiculo {
+  id               String                @id @default(uuid())
+  motocicletaId    String                @map("motocicleta_id")
+  tipo             TipoDocumentoVehiculo
+  nombre           String
+  url              String
+  fechaVencimiento DateTime?             @map("fecha_vencimiento")
+  fechaSubida      DateTime              @default(now()) @map("fecha_subida")
+  subidoPor        String?               @map("subido_por")
+
+  // Relaciones
+  motocicleta Motocicleta @relation(fields: [motocicletaId], references: [id], onDelete: Cascade)
+
+  @@map("documentos_vehiculo")
+}
+
+model Contrato {
+  id             String         @id @default(uuid())
+  clienteId      String         @map("cliente_id")
+  motocicletaId  String         @map("motocicleta_id")
+  estado         EstadoContrato @default(ACTIVO)
+  fechaInicio    DateTime       @map("fecha_inicio")
+  fechaFin       DateTime       @map("fecha_fin")
+  montoSemanal   Decimal        @map("monto_semanal") @db.Decimal(12, 2)
+  totalContrato  Decimal        @map("total_contrato") @db.Decimal(12, 2)
+  saldoPendiente Decimal        @map("saldo_pendiente") @db.Decimal(12, 2)
+  cuotasTotales  Int            @map("cuotas_totales")
+  cuotasPagadas  Int            @default(0) @map("cuotas_pagadas")
+  observaciones  String?
+  creadoEn       DateTime       @default(now()) @map("creado_en")
+  actualizadoEn  DateTime       @updatedAt @map("actualizado_en")
+
+  // Relaciones
+  cliente        Cliente        @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  motocicleta    Motocicleta    @relation(fields: [motocicletaId], references: [id], onDelete: Restrict)
+  cuotas         Cuota[]
+  pagos          Pago[]
+  notificaciones Notificacion[]
+
+  @@map("contratos")
+}
+
+model Cuota {
+  id               String     @id @default(uuid())
+  contratoId       String     @map("contrato_id")
+  numeroCuota      Int        @map("numero_cuota")
+  monto            Decimal    @db.Decimal(12, 2)
+  montoBase        Decimal    @db.Decimal(12, 2) @default(0)
+  montoMultas      Decimal    @db.Decimal(12, 2) @default(0)
+  montoExcedentes  Decimal    @db.Decimal(12, 2) @default(0)
+  fechaVencimiento DateTime   @map("fecha_vencimiento")
+  fechaPago        DateTime?  @map("fecha_pago")
+  estado           EstadoPago @default(PENDIENTE)
+  diasMorosidad    Int        @default(0) @map("dias_morosidad")
+  referencia       String?
+
+  // Relaciones
+  contrato       Contrato       @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  pagos          Pago[]
+  notificaciones Notificacion[]
+
+  @@unique([contratoId, numeroCuota])
+  @@map("cuotas")
+}
+
+model Pago {
+  id            String     @id @default(uuid())
+  contratoId    String     @map("contrato_id")
+  cuotaId       String?    @map("cuota_id")
+  clienteId     String     @map("cliente_id")
+  monto         Decimal    @db.Decimal(12, 2)
+  metodoPago    MetodoPago @map("metodo_pago")
+  referencia    String?
+  comprobante   String?
+  registradoPor String?    @map("registrado_por")
+  fechaPago     DateTime   @default(now()) @map("fecha_pago")
+  notas         String?
+
+  // Relaciones
+  contrato Contrato @relation(fields: [contratoId], references: [id], onDelete: Restrict)
+  cuota    Cuota?   @relation(fields: [cuotaId], references: [id], onDelete: SetNull)
+  cliente  Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+
+  @@map("pagos")
+}
+
+model ScoreCredito {
+  id                  String         @id @default(uuid())
+  clienteId           String         @unique @map("cliente_id")
+  puntaje             Int
+  categoria           ScoreCategoria
+  porcentajePuntual   Float          @map("porcentaje_puntual")
+  diasPromedioMora    Float          @map("dias_promedio_mora")
+  cuotasPagadas       Int            @default(0) @map("cuotas_pagadas")
+  cuotasTotales       Int            @default(0) @map("cuotas_totales")
+  tendencia           TendenciaScore @default(ESTABLE)
+  ultimaActualizacion DateTime       @default(now()) @map("actualizado_en")
+
+  // Relaciones
+  cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@map("scores_credito")
+}
+
+model AlertaDesactivacion {
+  id              String         @id @default(uuid())
+  clienteId       String         @map("cliente_id")
+  motocicletaId   String         @map("motocicleta_id")
+  motivo          MotivoAlerta
+  diasMora        Int?           @map("dias_mora")
+  fechaProgramada DateTime       @map("fecha_programada")
+  urgencia        UrgenciaAlerta @default(MEDIA)
+  atendida        Boolean        @default(false)
+  atendidaEn      DateTime?      @map("atendida_en")
+  creadaEn        DateTime       @default(now()) @map("creada_en")
+
+  // Relaciones
+  cliente     Cliente     @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  motocicleta Motocicleta @relation(fields: [motocicletaId], references: [id], onDelete: Cascade)
+
+  @@map("alertas_desactivacion")
+}
+
+model ComandoGPS {
+  id            String           @id @default(uuid())
+  motocicletaId String           @map("motocicleta_id")
+  accion        AccionGPS
+  solicitadoPor String           @map("solicitado_por")
+  timestamp     DateTime         @default(now())
+  resultado     ResultadoComando @default(PENDIENTE)
+  mensajeError  String?          @map("mensaje_error")
+
+  // Relaciones
+  motocicleta Motocicleta @relation(fields: [motocicletaId], references: [id], onDelete: Cascade)
+  usuario     Usuario     @relation(fields: [solicitadoPor], references: [id], onDelete: Restrict)
+
+  @@map("comandos_gps")
+}
+
+model Notificacion {
+  id         String   @id @default(uuid())
+  clienteId  String   @map("cliente_id")
+  contratoId String?  @map("contrato_id")
+  cuotaId    String?  @map("cuota_id")
+  tipo       String
+  titulo     String
+  mensaje    String
+  leida      Boolean  @default(false)
+  creadaEn   DateTime @default(now()) @map("creada_en")
+  error      String?  @map("error")
+  intentos   Int      @default(0) @map("intentos")
+
+  // Relaciones
+  cliente  Cliente   @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  contrato Contrato? @relation(fields: [contratoId], references: [id], onDelete: Cascade)
+  cuota    Cuota?    @relation(fields: [cuotaId], references: [id], onDelete: Cascade)
+
+  @@map("notificaciones")
+}
+
+model ConfiguracionNotificacion {
+  id        String @id @default(uuid())
+  diaSemana Int    @map("dia_semana")
+  hora      Int    @map("hora")
+
+  @@map("configuracion_notificacion")
+}
