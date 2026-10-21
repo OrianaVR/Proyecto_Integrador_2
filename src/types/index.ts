@@ -43,6 +43,7 @@ export interface Cuota {
   id: string; contratoId: string; numeroCuota: number; monto: number;
   fechaVencimiento: string; fechaPago?: string; estado: EstadoPago;
   diasMorosidad: number; referencia?: string;
+  montoBase?: number; multas?: number; excedentes?: number;
 }
 
 export interface Pago {
