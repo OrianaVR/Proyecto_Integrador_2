@@ -243,6 +243,50 @@ model Cuota {
 
   @@unique([contratoId, numeroCuota])
   @@map("cuotas")
+
+  // ────────────────────────────────── MULTAS ──────────────────────────────────
+
+  model Multa {
+    id          String   @id @default(uuid())
+    clienteId   String   @map("cliente_id")
+    contratoId  String?  @map("contrato_id")
+    monto       Decimal  @db.Decimal(12, 2)
+    descripcion String?
+    fecha       DateTime @map("fecha")
+    pagada      Boolean  @default(false) @map("pagada")
+    creadoEn    DateTime @default(now()) @map("creado_en")
+
+    // Relaciones
+    cliente  Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+    contrato Contrato? @relation(fields: [contratoId], references: [id], onDelete: SetNull)
+
+    @@map("multas")
+  model CargoAdicional {
+    id          String   @id @default(uuid())
+    clienteId   String   @map("cliente_id")
+    contratoId  String?  @map("contrato_id")
+    concepto    String
+    monto       Decimal  @db.Decimal(12, 2)
+    pagada      Boolean  @default(false) @map("pagada")
+    creadoEn    DateTime @default(now()) @map("creado_en")
+
+    // Relaciones
+    cliente  Cliente  @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+    contrato Contrato? @relation(fields: [contratoId], references: [id], onDelete: SetNull)
+
+    @@map("cargos_adicionales")
+  }
+
+  // ────────────────────────────────── LOG ADMIN ──────────────────────────────────
+  model Log {
+    id        String   @id @default(uuid())
+    nivel     String   // e.g., INFO, WARN, ERROR
+    mensaje   String
+    timestamp DateTime @default(now())
+
+    @@map("logs")
+  }
+
 }
 
 model Pago {
@@ -261,7 +305,7 @@ model Pago {
   // Relaciones
   contrato Contrato @relation(fields: [contratoId], references: [id], onDelete: Restrict)
   cuota    Cuota?   @relation(fields: [cuotaId], references: [id], onDelete: SetNull)
-  cliente  Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  estado       EstadoPago @default(PENDIENTE) @map("estado")
 
   @@map("pagos")
 }

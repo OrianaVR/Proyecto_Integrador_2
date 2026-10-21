@@ -1,6 +1,7 @@
 const { readDb, updateDb } = require('./db');
 const { daysBetween, todayISO } = require('./utils');
 const { enviarRecordatorioCobro, createNotification } = require('./notifications');
+const { id } = require('./utils');
 
 /**
  * HU-01: Procesa el envío de notificaciones automáticas de cobro
@@ -176,7 +177,64 @@ Si no realizas el pago antes del corte, tu motocicleta será apagada.
     enviadas.push({ notificacionId: notificacion.id, clienteId: cliente.id, cuotaId: cuota.id, canal: notificacion.canal });
   }
 
-  return { enviadas, total: enviadas.length };
+  return { enviadas, total: enviadas.length }
+
+// Weekly liquidation service
+async function runWeeklyLiquidation() {
+  const db = readDb();
+  const today = todayISO();
+  const results = [];
+  for (const contrato of db.contratos) {
+    try {
+      const cliente = db.clientes.find(c => c.id === contrato.clienteId);
+      if (!cliente) throw new Error('Cliente no encontrado');
+      const montoBase = Number(contrato.montoSemanal) || 0;
+      const multas = (db.multas || []).filter(m => m.contratoId === contrato.id && !m.pagada);
+      const totalMultas = multas.reduce((s, m) => s + Number(m.monto), 0);
+      const cargos = (db.cargos || []).filter(c => c.contratoId === contrato.id && !c.pagada);
+      const totalCargos = cargos.reduce((s, c) => s + Number(c.monto), 0);
+      const total = montoBase + totalMultas + totalCargos;
+      const liquidacion = {
+        id: id('liq'),
+        contratoId: contrato.id,
+        clienteId: cliente.id,
+        fecha: today,
+        montoBase,
+        totalMultas,
+        totalCargos,
+        total,
+        estado: 'COMPLETA',
+        mensajeError: null
+      };
+      db.liquidaciones.push(liquidacion);
+      results.push({ contratoId: contrato.id, total, estado: 'OK' });
+    } catch (e) {
+      const log = {
+        id: id('log'),
+        nivel: 'ERROR',
+        mensaje: `Error liquidando contrato ${contrato.id}: ${e.message}` ,
+        timestamp: new Date().toISOString()
+      };
+      db.logs.push(log);
+      const liquidacionError = {
+        id: id('liq'),
+        contratoId: contrato.id,
+        clienteId: contrato.clienteId,
+        fecha: today,
+        montoBase: Number(contrato.montoSemanal) || 0,
+        totalMultas: 0,
+        totalCargos: 0,
+        total: 0,
+        estado: 'ERROR',
+        mensajeError: e.message
+      };
+      db.liquidaciones.push(liquidacionError);
+      results.push({ contratoId: contrato.id, total: 0, estado: 'ERROR', error: e.message });
+    }
+  }
+  updateDb(() => db);
+  return results;
+};
 }
 
 // Modificar runJobs para incluir el nuevo proceso
@@ -185,7 +243,8 @@ async function runJobs() {
   const collection = await processAutomaticCollection();
   const preCutoff = await processPreCutoffReminders();
   const shutdowns = autoShutdownMotos();
-  return { overdue, ...collection, preCutoff, shutdowns, executedAt: new Date().toISOString() };
+  const liquidation = await runWeeklyLiquidation();
+  return { overdue, ...collection, preCutoff, shutdowns, liquidation, executedAt: new Date().toISOString() };
 }
 
 

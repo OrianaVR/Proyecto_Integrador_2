@@ -13,8 +13,11 @@ const EMPTY_DB = {
   pagos: [],
   scores: [],
   alertas: [],
-  notificaciones: [],
+  cargos: [],
   comandosGPS: [],
+  multas: [],
+  liquidaciones: [],
+  logs: [],
 };
 
 function ensureDb() {
