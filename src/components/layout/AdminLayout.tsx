@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
   LayoutDashboard, Users, Bike, AlertTriangle, UserPlus,
-  LogOut, Menu, X, Zap, ChevronRight,
+  LogOut, Menu, Zap, ChevronRight,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { cn } from '@/lib/utils';
@@ -18,20 +18,22 @@ const NAV_ITEMS = [
   { href: '/admin/desactivaciones', label: 'Desactivaciones',  icon: AlertTriangle },
 ];
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const pathname  = usePathname();
-  const router    = useRouter();
-  const { logout } = useAuthStore();
-  const [open, setOpen]   = useState(false);
-
-  const handleLogout = () => { logout(); router.push('/login'); };
-
-  const Sidebar = ({ mobile = false }) => (
+function Sidebar({
+  mobile = false,
+  pathname,
+  onNavigate,
+  onLogout,
+}: {
+  mobile?: boolean;
+  pathname: string;
+  onNavigate: () => void;
+  onLogout: () => void;
+}) {
+  return (
     <aside className={cn(
       'flex flex-col h-full bg-[#141414] border-r border-white/8',
       mobile ? 'w-72' : 'w-64',
     )}>
-      {/* Logo */}
       <div className="flex items-center gap-3 px-6 py-5 border-b border-white/8">
         <div className="w-9 h-9 rounded-xl bg-[#C0001A] flex items-center justify-center racing-glow">
           <Zap className="w-5 h-5 text-white fill-white" />
@@ -42,7 +44,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </div>
 
-      {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || (href !== '/admin/dashboard' && pathname.startsWith(href));
@@ -50,7 +51,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <Link
               key={href}
               href={href}
-              onClick={() => setOpen(false)}
+              onClick={onNavigate}
               className={cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 group',
                 active
@@ -66,10 +67,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         })}
       </nav>
 
-      {/* Footer */}
       <div className="px-3 py-4 border-t border-white/8">
         <button
-          onClick={handleLogout}
+          onClick={onLogout}
           className="flex w-full items-center gap-3 px-3 py-2.5 rounded-xl text-sm text-[#A0A0A0] hover:bg-red-500/10 hover:text-red-400 transition-all duration-200 group"
         >
           <LogOut className="w-4.5 h-4.5 shrink-0 group-hover:text-red-400" />
@@ -78,12 +78,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </div>
     </aside>
   );
+}
+
+export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const pathname  = usePathname();
+  const router    = useRouter();
+  const { logout } = useAuthStore();
+  const [open, setOpen]   = useState(false);
+
+  const handleLogout = () => { logout(); router.push('/login'); };
 
   return (
     <div className="flex h-screen overflow-hidden bg-[#141414]">
       {/* Sidebar Desktop */}
       <div className="hidden lg:flex flex-shrink-0">
-        <Sidebar />
+        <Sidebar pathname={pathname} onNavigate={() => setOpen(false)} onLogout={handleLogout} />
       </div>
 
       {/* Mobile overlay */}
@@ -91,7 +100,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <div className="fixed inset-0 z-40 lg:hidden">
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
           <div className="absolute left-0 top-0 h-full z-50">
-            <Sidebar mobile />
+            <Sidebar mobile pathname={pathname} onNavigate={() => setOpen(false)} onLogout={handleLogout} />
           </div>
         </div>
       )}

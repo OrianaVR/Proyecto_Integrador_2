@@ -5,7 +5,8 @@ import { getClient } from '@/services/api/endpoints';
 import { Zap, ZapOff, TrendingUp, TrendingDown, Minus, CheckCircle2, AlertTriangle, Clock, LogOut, Bike } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { ScoreCategoria } from '@/types';
+import type { ClienteConDetalle, ScoreCategoria } from '@/types';
+import { getErrorMessage } from '@/services/api/client';
 
 const formatCOP=(n:number)=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n);
 
@@ -25,14 +26,15 @@ export default function RiderMiEstadoPage() {
   const router = useRouter();
   const { user, logout } = useAuthStore();
   const clienteId = user?.clienteId ?? user?.id;
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<ClienteConDetalle | null>(null);
   const [error, setError] = useState('');
-  useEffect(() => { if (clienteId) getClient(clienteId).then(setData).catch(e => setError(e.response?.data?.error || e.message)); }, [clienteId]);
+  useEffect(() => { if (clienteId) getClient(clienteId).then(setData).catch(error => setError(getErrorMessage(error))); }, [clienteId]);
   const cliente = data?.cliente, motocicleta = data?.motocicleta, contrato = data?.contrato, score = data?.score, historial = data?.historial || [];
 
   const handleLogout = () => { logout(); router.push('/login'); };
 
   if (!data) return <div className="min-h-screen bg-[#141414] flex items-center justify-center text-white">{error || 'Cargando…'}</div>;
+  if (!cliente || !motocicleta || !contrato) return <div className="min-h-screen bg-[#141414] flex items-center justify-center text-white">Información del contrato incompleta.</div>;
 
   const progreso = contrato.cuotasTotales ? Math.round((contrato.cuotasPagadas / contrato.cuotasTotales) * 100) : 0;
   const color    = score ? scoreColors[score.categoria] : '#A0A0A0';

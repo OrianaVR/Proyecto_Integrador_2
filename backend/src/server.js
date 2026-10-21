@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const { readDb, updateDb, ensureDb } = require('./db');
 const { signToken, authenticate, authorize } = require('./auth');
-const { id, addDays, daysBetween, calculateScore } = require('./utils');
+const { id, calculateScore } = require('./utils');
 const { createNotification } = require('./notifications');
 const { runJobs } = require('./jobs');
 const { seed } = require('./seed');
@@ -15,7 +15,9 @@ const { seed } = require('./seed');
 ensureDb();
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
-const uploadDir = path.join(__dirname, '..', 'uploads');
+const uploadDir = process.env.MOTOLEASING_UPLOAD_DIR
+  ? path.resolve(process.env.MOTOLEASING_UPLOAD_DIR)
+  : path.join(__dirname, '..', 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -211,7 +213,24 @@ const BUSINESS_ERRORS = {
   CONTRACT_NOT_FOUND: [404, 'Contrato no encontrado'],
   INVALID_AMOUNT: [400, 'El monto debe ser un número mayor que cero'],
 };
-app.use((err,_req,res,_next)=>{ console.error(err); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?'El comprobante no puede superar los 5 MB':'El archivo del comprobante no es válido'); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); fail(res,500,'Error interno del servidor'); });
+app.use((err,_req,res,_next)=>{ if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?'El comprobante no puede superar los 5 MB':'El archivo del comprobante no es válido'); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); console.error(err); fail(res,500,'Error interno del servidor'); });
 
-app.listen(PORT, async ()=>{ console.log(`MotoLeasing API escuchando en http://localhost:${PORT}`); try { if (readDb().usuarios.length === 0) await seed(); console.log('Jobs iniciales:', await runJobs()); } catch(e){ console.error('No se pudieron ejecutar jobs iniciales:',e.message); } });
-setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
+function startServer(port = PORT) {
+  const server = app.listen(port, async ()=>{
+    console.log(`MotoLeasing API escuchando en http://localhost:${server.address().port}`);
+    try {
+      if (readDb().usuarios.length === 0) await seed();
+      console.log('Jobs iniciales:', await runJobs());
+    } catch(e) {
+      console.error('No se pudieron ejecutar jobs iniciales:',e.message);
+    }
+  });
+  const timer = setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
+  timer.unref();
+  server.on('close', () => clearInterval(timer));
+  return server;
+}
+
+if (require.main === module) startServer();
+
+module.exports = { app, startServer };

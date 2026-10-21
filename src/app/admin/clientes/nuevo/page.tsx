@@ -6,6 +6,7 @@ import { useDropzone } from 'react-dropzone';
 import { CheckCircle2, User, Bike, FileText, Upload, X, ChevronRight, ChevronLeft, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/services/api/endpoints';
+import { getErrorMessage } from '@/services/api/client';
 
 const STEPS = [
   { id: 1, label: 'Datos del Cliente', icon: User },
@@ -34,7 +35,7 @@ function Field({ label, id, children }: { label: string; id: string; children: R
 const inputCls = 'w-full px-4 py-2.5 rounded-xl bg-[#141414]/80 border border-white/10 text-white placeholder-[#555555] text-sm focus:outline-none focus:border-[#C0001A]/50 focus:ring-1 focus:ring-[#C0001A]/20 transition';
 const selectCls = inputCls + ' cursor-pointer';
 
-function DropZoneSlot({ slotKey, label, accept }: { slotKey: string; label: string; accept: string }) {
+function DropZoneSlot({ label, accept }: { slotKey: string; label: string; accept: string }) {
   const [file, setFile] = useState<File | null>(null);
   const onDrop = useCallback((f: File[]) => { if (f[0]) setFile(f[0]); }, []);
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, accept: accept.split(',').reduce((a, v) => ({ ...a, [v]: [] }), {}), maxFiles: 1 });
@@ -81,8 +82,8 @@ export default function NuevoClientePage() {
       await createClient({ ...cliente, ...moto, año: Number(moto.año), montoSemanal: Number(moto.montoSemanal), cuotasTotales: Number(moto.cuotasTotales) });
       setDone(true);
       setTimeout(() => router.push('/admin/dashboard'), 1500);
-    } catch (e: any) {
-      alert(e.response?.data?.error || e.message || 'No se pudo registrar el cliente');
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'No se pudo registrar el cliente'));
     } finally { setSaving(false); }
   };
 

@@ -30,3 +30,13 @@ La primera vez que arranca el backend, si la base JSON está vacía, crea autom�
 - Frontend: `http://localhost:3000`
 
 El frontend usa Axios y JWT. Las pantallas principales consultan y modifican la API real; ya no dependen de `mockData` para login, dashboard, clientes, motocicletas, desactivaciones ni portal rider.
+
+## Calidad y pruebas automáticas
+
+```bash
+npm test              # Suite del Sprint 2
+npm run test:coverage # Suite con cobertura
+npm run quality       # ESLint + TypeScript + pruebas + build
+```
+
+La estrategia, matriz de trazabilidad y guion de la demo están en [`docs/Estrategia-Pruebas-Automaticas-Sprint-2.md`](docs/Estrategia-Pruebas-Automaticas-Sprint-2.md).

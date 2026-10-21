@@ -2,7 +2,9 @@ const fs = require('fs');
 const path = require('path');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
+const DB_FILE = process.env.MOTOLEASING_DB_FILE
+  ? path.resolve(process.env.MOTOLEASING_DB_FILE)
+  : path.join(DATA_DIR, 'db.json');
 
 const EMPTY_DB = {
   usuarios: [],
@@ -18,7 +20,7 @@ const EMPTY_DB = {
 };
 
 function ensureDb() {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
   if (!fs.existsSync(DB_FILE)) writeDb(EMPTY_DB);
 }
 
@@ -28,7 +30,7 @@ function readDb() {
 }
 
 function writeDb(db) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.mkdirSync(path.dirname(DB_FILE), { recursive: true });
   const temp = `${DB_FILE}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(db, null, 2), 'utf8');
   fs.renameSync(temp, DB_FILE);
