@@ -38,7 +38,7 @@ export default function RiderMiEstadoPage() {
   if (!cliente || !motocicleta || !contrato) return <div className="min-h-screen bg-[#141414] flex items-center justify-center text-white">Información del contrato incompleta.</div>;
 
   const progreso = contrato.cuotasTotales ? Math.round((contrato.cuotasPagadas / contrato.cuotasTotales) * 100) : 0;
-  const color    = score ? scoreColors[score.categoria] : '#A0A0A0';
+  const color    = score ? scoreColors[score.categoria as ScoreCategoria] : '#A0A0A0';
 
   return (
     <main className="min-h-screen bg-[#141414]">
@@ -142,8 +142,8 @@ export default function RiderMiEstadoPage() {
               <span className="text-2xl font-black" style={{ color }}>{score.puntaje}</span>
             </div>
             <div>
-              <p className="font-bold text-white">{scoreLabels[score.categoria]}</p>
-              <p className="text-xs text-[#666666] mt-0.5">{scoreMensaje[score.categoria]}</p>
+              <p className="font-bold text-white">{scoreLabels[score.categoria as ScoreCategoria]}</p>
+              <p className="text-xs text-[#666666] mt-0.5">{scoreMensaje[score.categoria as ScoreCategoria]}</p>
             </div>
           </div>
           <div className="h-1.5 rounded-full bg-gradient-to-r from-red-500 via-yellow-400 to-green-500 relative">

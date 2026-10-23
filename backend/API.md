@@ -80,18 +80,24 @@ Usa `multipart/form-data`:
 
 Al registrar el pago se actualizan cuota, saldo del contrato y score crediticio.
 
-## HU-01 — Cobro automático
+## HU-01 — Cobro automático y recordatorios de mensajería (WhatsApp/SMS)
 
-El job automático se ejecuta al iniciar el backend y cada hora.
+El job automático se ejecuta al iniciar el backend y cada hora (o mediante endpoint manual).
 
-- Marca cuotas vencidas.
-- Busca cuotas que vencen dentro de 24 horas.
-- Crea una notificación de cobro sin duplicarla.
-- Si `N8N_WEBHOOK_URL` está configurada, envía la notificación al webhook de n8n.
+- **Mensajería Integrada:** Soporta WhatsApp Cloud API, Twilio SMS o Webhook de n8n.
+- **Monto Total a Pagar:** Formatea e incluye explícitamente el valor de la cuota exigible (`$ 180.000 COP`), fecha de vencimiento y placa de la moto.
+- **Criterio 1 (CP-HU01-01):** En la fecha programada de cobro, envía el recordatorio al cliente por su canal telefónico y lo registra en su historial de notificaciones.
+- **Criterio 2 (CP-HU01-02):** Si el cliente ya registró su pago antes de la notificación, el sistema omite el recordatorio y no despacha ningún mensaje.
+- **Idempotencia:** No repite notificaciones ya emitidas para la misma cuota en la misma fecha.
+
+### POST `/jobs/cobro-automatico`
+Ejecuta el proceso de cobro automático. Permite enviar `{ "fecha": "YYYY-MM-DD" }` opcional para pruebas y simulaciones.
+
+### GET `/notificaciones/cliente/:clienteId`
+Consulta el historial de notificaciones y recordatorios emitidos para un cliente específico.
 
 ### POST `/jobs/run`
-
-Permite ejecutar el proceso manualmente desde un usuario admin para hacer una demostración.
+Ejecuta todos los procesos automáticos (marca de mora, cobro automático y apagado por mora) desde un usuario admin para demostraciones.
 
 ## HU-17 — Apagado automático
 
@@ -120,6 +126,18 @@ Consulta el estado actual.
 - `GET /pagos/cliente/:clienteId`
 - `GET /alertas/desactivacion`
 - `GET /notificaciones`
+
+## Reportes Financieros — HU Reportes
+
+### GET `/reportes/financiero`
+Genera el cálculo consolidado de ingresos, recaudos y saldo pendiente por rango de fechas (`fechaInicio` y `fechaFin`), con desgloses por método de pago, cliente y transacciones.
+Si no existen transacciones en el rango de fechas, devuelve `tieneDatos: false` y mensaje de advertencia.
+
+### GET `/reportes/financiero/pdf`
+Descarga el reporte consolidado formateado en documento PDF.
+
+### GET `/reportes/financiero/excel`
+Descarga el libro Excel (.xlsx) estructurado con hojas de Resumen Ejecutivo, Transacciones, Cuotas y Detalle por Cliente.
 
 ## Persistencia
 

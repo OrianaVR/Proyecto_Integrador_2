@@ -157,8 +157,8 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
           {/* Score gauge */}
           <div className="rounded-2xl border border-white/8 bg-[#1F1F1F]/60 p-5 flex flex-col items-center gap-3">
             <p className="text-xs font-semibold text-[#666666] uppercase tracking-wider">Score Crediticio</p>
-            <ScoreGauge puntaje={score.puntaje} categoria={score.categoria} />
-            <p className="text-xs text-[#666666] text-center">{scoreMensaje[score.categoria]}</p>
+            <ScoreGauge puntaje={score.puntaje} categoria={score.categoria as ScoreCategoria} />
+            <p className="text-xs text-[#666666] text-center">{scoreMensaje[score.categoria as ScoreCategoria]}</p>
             <div className="flex items-center gap-1.5 text-xs font-medium" style={{ color: score.tendencia === 'subiendo' ? '#22c55e' : score.tendencia === 'bajando' ? '#ef4444' : '#A0A0A0' }}>
               {score.tendencia === 'subiendo' ? <TrendingUp className="w-3.5 h-3.5" /> : score.tendencia === 'bajando' ? <TrendingDown className="w-3.5 h-3.5" /> : <Minus className="w-3.5 h-3.5" />}
               Tendencia {score.tendencia}

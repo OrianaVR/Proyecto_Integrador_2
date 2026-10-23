@@ -12,11 +12,14 @@ export type TipoDocumento   =
   | 'tecnomecanica' | 'tarjeta_propiedad'
   | 'licencia_conduccion' | 'foto_moto';
 
+export type NotificationChannel = 'whatsapp' | 'sms' | 'email';
+
 export interface Cliente {
   id: string; nombre: string; apellido: string; email: string;
   telefono: string; documentoId: string; plataforma: PlataformaGig;
   fechaRegistro: string; rol: RolUsuario; activo: boolean;
   fotoPerfil?: string; ciudad?: string;
+  canalPreferido?: NotificationChannel; // nuevo campo
 }
 
 export interface DocumentoVehiculo {
@@ -40,10 +43,18 @@ export interface Contrato {
 }
 
 export interface Cuota {
-  id: string; contratoId: string; numeroCuota: number; monto: number;
-  fechaVencimiento: string; fechaPago?: string; estado: EstadoPago;
-  diasMorosidad: number; referencia?: string;
-  montoBase?: number; multas?: number; excedentes?: number;
+  id: string;
+  contratoId: string;
+  numeroCuota: number;
+  monto: number;
+  montoBase?: number;
+  montoMultas?: number;
+  montoExcedentes?: number;
+  fechaVencimiento: string;
+  fechaPago?: string;
+  estado: EstadoPago;
+  diasMorosidad: number;
+  referencia?: string;
 }
 
 export interface Pago {
@@ -61,9 +72,16 @@ export interface ScoreCredito {
 }
 
 export interface HistorialPago {
-  cuotaId: string; numeroCuota: number; monto: number;
-  fechaVencimiento: string; fechaPago?: string;
-  estado: EstadoPago; diasDiferencia: number;
+  cuotaId: string;
+  numeroCuota: number;
+  monto: number;
+  montoBase?: number;
+  montoMultas?: number;
+  montoExcedentes?: number;
+  fechaVencimiento: string;
+  fechaPago?: string;
+  estado: EstadoPago;
+  diasDiferencia: number;
 }
 
 export interface AlertaDesactivacion {
@@ -103,6 +121,100 @@ export interface PaginatedResponse<T> {
   data: T[]; total: number; page: number; limit: number; totalPages: number;
 }
 
+export interface Notificacion {
+  id: string;
+  clienteId: string;
+  contratoId?: string | null;
+  cuotaId?: string | null;
+  tipo: 'cobro' | 'pago' | 'cuota_registrada' | 'general';
+  titulo: string;
+  mensaje: string;
+  monto?: number | null;
+  canal?: 'whatsapp' | 'sms' | 'webhook' | 'sistema';
+  destinatario?: string;
+  estado?: 'enviado' | 'entregado' | 'pendiente' | 'fallido';
+  fecha: string;
+  leida?: boolean;
+}
+
 export interface ApiResponse<T = unknown> {
   success: boolean; data?: T; message?: string; error?: string;
+}
+
+export interface TotalesReporteFinanciero {
+  totalRecaudado: number;
+  totalSaldoPendiente: number;
+  totalSaldoEnMora: number;
+  totalIngresos: number;
+  saldoPendienteGlobal: number;
+  tasaRecaudo: number;
+  cantidadPagos: number;
+  cuotasTotalesPeriodo: number;
+  cuotasPagadas: number;
+  cuotasPendientes: number;
+  cuotasVencidas: number;
+}
+
+export interface DesgloseMetodoPago {
+  metodo: string;
+  cantidad: number;
+  montoTotal: number;
+  porcentaje: number;
+}
+
+export interface DesgloseClienteReporte {
+  clienteId: string;
+  nombreCompleto: string;
+  documentoId: string;
+  placa: string;
+  montoRecaudado: number;
+  cuotasEsperadas: number;
+  cuotasPagadas: number;
+  saldoPendientePeriodo: number;
+  estadoContrato: string;
+}
+
+export interface TransaccionReporte {
+  id: string;
+  fechaPago: string;
+  fechaPagoCompleta: string;
+  monto: number;
+  metodoPago: string;
+  referencia: string;
+  clienteId: string;
+  clienteNombre: string;
+  documentoId: string;
+  motocicleta: string;
+  placa: string;
+  contratoId: string;
+  numeroCuota: number | null;
+  notas: string;
+}
+
+export interface CuotaReporte {
+  id: string;
+  contratoId: string;
+  numeroCuota: number;
+  monto: number;
+  fechaVencimiento: string;
+  fechaPago: string | null;
+  estado: EstadoPago;
+  diasMorosidad: number;
+  clienteNombre: string;
+  documentoId: string;
+  placa: string;
+}
+
+export interface ReporteFinanciero {
+  periodo: string;
+  fechaInicio: string;
+  fechaFin: string;
+  fechaGeneracion: string;
+  tieneDatos: boolean;
+  mensaje: string;
+  totales: TotalesReporteFinanciero;
+  desgloseMetodosPago: DesgloseMetodoPago[];
+  desglosePorCliente: DesgloseClienteReporte[];
+  transacciones: TransaccionReporte[];
+  cuotasDetalle: CuotaReporte[];
 }

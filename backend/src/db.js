@@ -16,7 +16,11 @@ const EMPTY_DB = {
   scores: [],
   alertas: [],
   notificaciones: [],
+  cargos: [],
   comandosGPS: [],
+  multas: [],
+  liquidaciones: [],
+  logs: [],
 };
 
 function ensureDb() {
@@ -26,7 +30,8 @@ function ensureDb() {
 
 function readDb() {
   ensureDb();
-  return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
+  // Completa las colecciones que falten en bases creadas antes de agregarlas (multas, cargos, logs, etc.)
+  return { ...structuredClone(EMPTY_DB), ...JSON.parse(fs.readFileSync(DB_FILE, 'utf8')) };
 }
 
 function writeDb(db) {

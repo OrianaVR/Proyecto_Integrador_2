@@ -228,7 +228,8 @@ describe('HU-01 - Notificación automática de cobro', () => {
     writeDb(db);
     const { payload } = await api('/api/jobs/run', { method: 'POST' });
     assert.equal(payload.data.notifications, 0);
-    assert.equal(readDb().notificaciones.length, 1);
+    // Solo se cuentan los avisos de cobro: cerca de medianoche también se envía el aviso previo al corte (HU-05)
+    assert.equal(readDb().notificaciones.filter(n => n.tipo === 'cobro').length, 1);
   });
 });
 

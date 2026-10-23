@@ -41,8 +41,8 @@ export default function ProximaCuotaCard({ cuota }: { cuota: Cuota | null }) {
 
   const dias = diasHasta(cuota.fechaVencimiento);
   const vencida = cuota.estado === 'vencido' || dias < 0;
-  const multas = cuota.multas ?? 0;
-  const excedentes = cuota.excedentes ?? 0;
+  const multas = cuota.montoMultas ?? 0;
+  const excedentes = cuota.montoExcedentes ?? 0;
   const base = cuota.montoBase ?? cuota.monto - multas - excedentes;
   const hayDesglose = multas > 0 || excedentes > 0;
 
