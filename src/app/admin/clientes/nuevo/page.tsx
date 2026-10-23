@@ -6,6 +6,7 @@ import { useDropzone } from 'react-dropzone';
 import { CheckCircle2, User, Bike, FileText, Upload, X, ChevronRight, ChevronLeft, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/services/api/endpoints';
+import { getErrorMessage } from '@/services/api/client';
 
 const STEPS = [
   { id: 1, label: 'Datos del Cliente', icon: User },
@@ -34,9 +35,8 @@ function Field({ label, id, children }: { label: string; id: string; children: R
 const inputCls = 'w-full px-4 py-2.5 rounded-xl bg-[#141414]/80 border border-white/10 text-white placeholder-[#555555] text-sm focus:outline-none focus:border-[#C0001A]/50 focus:ring-1 focus:ring-[#C0001A]/20 transition';
 const selectCls = inputCls + ' cursor-pointer';
 
-function DropZoneSlot({ slotKey, label, accept }: { slotKey: string; label: string; accept: string }) {
-  const [file, setFile] = useState<File | null>(null);
-  const onDrop = useCallback((f: File[]) => { if (f[0]) setFile(f[0]); }, []);
+function DropZoneSlot({ label, accept, file, setFile }: { slotKey: string; label: string; accept: string; file: File | null; setFile: (f: File | null) => void }) {
+  const onDrop = useCallback((f: File[]) => { if (f[0]) setFile(f[0]); }, [setFile]);
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, accept: accept.split(',').reduce((a, v) => ({ ...a, [v]: [] }), {}), maxFiles: 1 });
 
   return (
@@ -74,15 +74,21 @@ export default function NuevoClientePage() {
 
   const setC = (k: string, v: string) => setCliente(p => ({ ...p, [k]: v }));
   const setM = (k: string, v: string) => setMoto(p => ({ ...p, [k]: v }));
+  const [documentos, setDocumentos] = useState<Record<string, File | null>>({});
+  const setDoc = useCallback((k: string, f: File | null) => setDocumentos(p => ({ ...p, [k]: f })), []);
 
   const handleSave = async () => {
     setSaving(true);
     try {
-      await createClient({ ...cliente, ...moto, año: Number(moto.año), montoSemanal: Number(moto.montoSemanal), cuotasTotales: Number(moto.cuotasTotales) });
+      // multipart/form-data para enviar los documentos junto con los datos del cliente y la moto
+      const form = new FormData();
+      Object.entries({ ...cliente, ...moto }).forEach(([k, v]) => form.append(k, v));
+      Object.entries(documentos).forEach(([k, f]) => { if (f) form.append(k, f); });
+      await createClient(form);
       setDone(true);
       setTimeout(() => router.push('/admin/dashboard'), 1500);
-    } catch (e: any) {
-      alert(e.response?.data?.error || e.message || 'No se pudo registrar el cliente');
+    } catch (error: unknown) {
+      alert(getErrorMessage(error, 'No se pudo registrar el cliente'));
     } finally { setSaving(false); }
   };
 
@@ -176,7 +182,8 @@ export default function NuevoClientePage() {
               <p className="text-xs text-[#666666]">Sube los documentos digitalizados. Formatos aceptados: PDF, JPG, PNG.</p>
               <div className="grid sm:grid-cols-2 gap-4">
                 {DOCUMENT_SLOTS.map(slot => (
-                  <DropZoneSlot key={slot.key} slotKey={slot.key} label={slot.label} accept={slot.accept} />
+                  <DropZoneSlot key={slot.key} slotKey={slot.key} label={slot.label} accept={slot.accept}
+                    file={documentos[slot.key] ?? null} setFile={f => setDoc(slot.key, f)} />
                 ))}
               </div>
             </>

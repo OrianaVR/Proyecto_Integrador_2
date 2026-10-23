@@ -115,6 +115,7 @@ export function getClientesConDetalle(): ClienteConDetalle[] {
       cliente, motocicleta: moto, contrato, score,
       diasMora: cuota?.diasMorosidad ?? 0,
       proximaCuota: cuota,
+      historial: HISTORIAL_PAGOS[cliente.id] ?? [],
     };
   });
 }

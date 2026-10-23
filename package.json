@@ -10,6 +10,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "npm --prefix backend test",
+    "test:coverage": "npm --prefix backend run test:coverage",
+    "quality": "npm run lint && npm run typecheck && npm test && npm run build",
     "dev:all": "start \"MotoLeasing Backend\" cmd /k \"cd /d %~dp0backend && npm run dev\" && npm run dev"
   },
   "dependencies": {

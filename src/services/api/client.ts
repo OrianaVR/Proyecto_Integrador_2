@@ -1,6 +1,13 @@
 import axios from 'axios';
 import { useAuthStore } from '@/store/authStore';
 
+export function getErrorMessage(error: unknown, fallback = 'Ocurrió un error inesperado') {
+  if (axios.isAxiosError<{ error?: string }>(error)) {
+    return error.response?.data?.error ?? error.message ?? fallback;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+
 const apiClient = axios.create({
   baseURL: process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api',
   timeout: 10_000,
@@ -28,7 +35,8 @@ apiClient.interceptors.response.use(
       if (typeof window !== 'undefined') {
         // logout() limpia el token Y el estado persistido ('moto-auth')
         useAuthStore.getState().logout();
-        window.location.href = '/login';
+        window.history.replaceState(null, '', '/login');
+        window.location.reload();
       }
     }
     return Promise.reject(error);

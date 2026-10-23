@@ -86,10 +86,18 @@ export interface ComandoGPS {
 }
 
 export interface ClienteConDetalle {
-  cliente: Cliente; motocicleta: Motocicleta;
-  contrato: Contrato; score: ScoreCredito;
+  cliente: Cliente; motocicleta: Motocicleta | null;
+  contrato: Contrato | null; score: ScoreCredito | null;
   diasMora: number; proximaCuota: Cuota | null;
+  historial: HistorialPago[];
 }
+
+export type UsuarioAutenticado = Partial<Cliente> & {
+  id: string;
+  email: string;
+  rol: RolUsuario;
+  clienteId?: string | null;
+};
 
 export interface PaginatedResponse<T> {
   data: T[]; total: number; page: number; limit: number; totalPages: number;

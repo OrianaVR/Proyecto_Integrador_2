@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const { readDb, updateDb, ensureDb } = require('./db');
 const { signToken, authenticate, authorize } = require('./auth');
-const { id, addDays, daysBetween, calculateScore } = require('./utils');
+const { id, calculateScore } = require('./utils');
 const { createNotification } = require('./notifications');
 const { runJobs } = require('./jobs');
 const { seed } = require('./seed');
@@ -15,7 +15,9 @@ const { seed } = require('./seed');
 ensureDb();
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
-const uploadDir = path.join(__dirname, '..', 'uploads');
+const uploadDir = process.env.MOTOLEASING_UPLOAD_DIR
+  ? path.resolve(process.env.MOTOLEASING_UPLOAD_DIR)
+  : path.join(__dirname, '..', 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -23,7 +25,7 @@ const storage = multer.diskStorage({
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_req, file, cb) => ALLOWED_TYPES.includes(file.mimetype) ? cb(null, true) : cb(new Error('INVALID_FILE_TYPE')) });
+const upload = multer({ storage, defParamCharset: 'utf8', limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_req, file, cb) => ALLOWED_TYPES.includes(file.mimetype) ? cb(null, true) : cb(new Error('INVALID_FILE_TYPE')) });
 
 app.use(cors({ origin: process.env.FRONTEND_URL || true, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
@@ -97,22 +99,33 @@ app.get('/api/clientes/:id', authenticate, (req,res)=>{
   const detalle=clienteDetalle(readDb(),req.params.id); if(!detalle) return fail(res,404,'Cliente no encontrado'); ok(res,detalle);
 });
 
-app.post('/api/clientes', authenticate, authorize('admin'), (req,res)=>{
-  const body=req.body; const missing=validateRequired(body,['nombre','apellido','email','telefono','documentoId','plataforma','ciudad','marca','modelo','año','placa','numeroSerie','color','montoSemanal','cuotasTotales','fechaInicio','fechaFin']); if(missing) return fail(res,400,`El campo ${missing} es obligatorio`);
-  const result=updateDb(db=>{
-    if(db.clientes.some(c=>c.email.toLowerCase()===String(body.email).toLowerCase())) throw new Error('EMAIL_EXISTS');
+const DOCUMENT_KEYS = ['cedula', 'contrato_firmado', 'soat', 'tecnomecanica', 'tarjeta_propiedad', 'licencia'];
+
+function discardUploads(req) {
+  for (const file of Object.values(req.files || {}).flat()) fs.rmSync(file.path, { force: true });
+}
+
+app.post('/api/clientes', authenticate, authorize('admin'), upload.fields(DOCUMENT_KEYS.map(name => ({ name, maxCount: 1 }))), async (req,res)=>{
+  const body=req.body; const missing=validateRequired(body,['nombre','apellido','email','telefono','documentoId','plataforma','ciudad','marca','modelo','año','placa','numeroSerie','color','montoSemanal','cuotasTotales','fechaInicio','fechaFin']); if(missing) { discardUploads(req); return fail(res,400,`El campo ${missing} es obligatorio`); }
+  // Contraseña inicial del rider: su número de documento
+  const passwordHash=await bcrypt.hash(String(body.documentoId),12);
+  let result;
+  try { result=updateDb(db=>{
+    if(db.clientes.some(c=>c.email.toLowerCase()===String(body.email).toLowerCase()) || db.usuarios.some(u=>u.email.toLowerCase()===String(body.email).toLowerCase())) throw new Error('EMAIL_EXISTS');
     if(db.clientes.some(c=>c.documentoId===String(body.documentoId))) throw new Error('DOC_EXISTS');
     if(db.motocicletas.some(m=>m.placa===String(body.placa).toUpperCase())) throw new Error('PLATE_EXISTS');
     if(body.dispositivoGPS && db.motocicletas.some(m=>m.dispositivoGPS===String(body.dispositivoGPS))) throw new Error('GPS_EXISTS');
     const clienteId=id('c'), motoId=id('m'), contratoId=id('ct');
     const cliente={id:clienteId,nombre:body.nombre,apellido:body.apellido,email:body.email,telefono:body.telefono,documentoId:String(body.documentoId),plataforma:body.plataforma,fechaRegistro:new Date().toISOString().slice(0,10),rol:'rider',activo:true,ciudad:body.ciudad};
     const moto={id:motoId,marca:body.marca,modelo:body.modelo,año:Number(body.año),placa:String(body.placa).toUpperCase(),numeroSerie:body.numeroSerie,color:body.color,estadoGPS:'apagado',dispositivoGPS:body.dispositivoGPS||null,disponible:true,clienteId:clienteId,creadoEn:new Date().toISOString(),vencimientoSOAT:body.vencimientoSOAT||null,vencimientoTecno:body.vencimientoTecno||null,documentos:[]};
+    for (const [tipo, [file]] of Object.entries(req.files || {})) moto.documentos.push({id:id('doc'),motocicletaId:motoId,tipo,nombre:file.originalname,url:`/uploads/${file.filename}`,fechaSubida:new Date().toISOString(),subidoPor:req.user.id});
     const monto=Number(body.montoSemanal), cuotas=Number(body.cuotasTotales), total=monto*cuotas;
     const contrato={id:contratoId,clienteId,motocicletaId:motoId,estado:'activo',fechaInicio:body.fechaInicio,fechaFin:body.fechaFin,montoSemanal:monto,totalContrato:total,saldoPendiente:total,cuotasTotales:cuotas,cuotasPagadas:0,observaciones:body.observaciones||null,creadoEn:new Date().toISOString(),actualizadoEn:new Date().toISOString()};
     db.clientes.push(cliente); db.motocicletas.push(moto); db.contratos.push(contrato);
     db.scores.push({...calculateScore([]),clienteId,cuotasPagadas:0,cuotasTotales:cuotas,ultimaActualizacion:new Date().toISOString().slice(0,10)});
+    db.usuarios.push({id:id('user'),email:body.email,passwordHash,rol:'rider',clienteId,activo:true});
     return {cliente,moto,contrato};
-  });
+  }); } catch (e) { discardUploads(req); throw e; }
   ok(res,result,'Cliente, motocicleta y contrato registrados');
 });
 
@@ -128,7 +141,8 @@ app.post('/api/cuotas', authenticate, authorize('admin'), async (req,res)=>{
   const result=updateDb(db=>{
     const contrato=db.contratos.find(c=>c.id===contratoId); if(!contrato) throw new Error('CONTRACT_NOT_FOUND');
     if(db.cuotas.some(c=>c.contratoId===contratoId && c.numeroCuota===Number(numeroCuota))) throw new Error('FEE_EXISTS');
-    const cuota={id:id('cuota'),contratoId,numeroCuota:Number(numeroCuota),monto:Number(monto),fechaVencimiento,fechaPago:null,estado:'pendiente',diasMorosidad:0,referencia:null}; db.cuotas.push(cuota); contrato.cuotasTotales=Math.max(contrato.cuotasTotales,Number(numeroCuota)); contrato.totalContrato=contrato.montoSemanal*contrato.cuotasTotales; contrato.saldoPendiente += Number(monto); contrato.actualizadoEn=new Date().toISOString(); return cuota;
+    const cuota={id:id('cuota'),contratoId,numeroCuota:Number(numeroCuota),monto:Number(monto),fechaVencimiento,fechaPago:null,estado:'pendiente',diasMorosidad:0,referencia:null}; db.cuotas.push(cuota); // Una cuota dentro del plazo del contrato ya está incluida en el total (por montoSemanal): solo se suma la diferencia
+    const incluido=Number(numeroCuota)<=contrato.cuotasTotales?contrato.montoSemanal:0, diferencia=Number(monto)-incluido; contrato.cuotasTotales=Math.max(contrato.cuotasTotales,Number(numeroCuota)); contrato.totalContrato += diferencia; contrato.saldoPendiente += diferencia; contrato.actualizadoEn=new Date().toISOString(); return cuota;
   });
   const contrato=readDb().contratos.find(c=>c.id===contratoId); if(contrato) await createNotification({clienteId:contrato.clienteId,contratoId,cuotaId:result.id,tipo:'cuota_registrada',titulo:'Nueva cuota registrada',mensaje:`Se registró la cuota #${result.numeroCuota} por $${result.monto.toLocaleString('es-CO')}.`});
   ok(res,result,'Cuota semanal registrada');
@@ -211,7 +225,24 @@ const BUSINESS_ERRORS = {
   CONTRACT_NOT_FOUND: [404, 'Contrato no encontrado'],
   INVALID_AMOUNT: [400, 'El monto debe ser un número mayor que cero'],
 };
-app.use((err,_req,res,_next)=>{ console.error(err); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?'El comprobante no puede superar los 5 MB':'El archivo del comprobante no es válido'); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); fail(res,500,'Error interno del servidor'); });
+app.use((err,req,res,_next)=>{ const esDocumento=req.path==='/api/clientes'; if(err instanceof multer.MulterError||err.message==='INVALID_FILE_TYPE') discardUploads(req); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?(esDocumento?'Cada documento no puede superar los 5 MB':'El comprobante no puede superar los 5 MB'):(esDocumento?'Los documentos enviados no son válidos':'El archivo del comprobante no es válido')); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,esDocumento?'Los documentos deben ser archivos PDF, JPG o PNG':'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); console.error(err); fail(res,500,'Error interno del servidor'); });
 
-app.listen(PORT, async ()=>{ console.log(`MotoLeasing API escuchando en http://localhost:${PORT}`); try { if (readDb().usuarios.length === 0) await seed(); console.log('Jobs iniciales:', await runJobs()); } catch(e){ console.error('No se pudieron ejecutar jobs iniciales:',e.message); } });
-setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
+function startServer(port = PORT) {
+  const server = app.listen(port, async ()=>{
+    console.log(`MotoLeasing API escuchando en http://localhost:${server.address().port}`);
+    try {
+      if (readDb().usuarios.length === 0) await seed();
+      console.log('Jobs iniciales:', await runJobs());
+    } catch(e) {
+      console.error('No se pudieron ejecutar jobs iniciales:',e.message);
+    }
+  });
+  const timer = setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
+  timer.unref();
+  server.on('close', () => clearInterval(timer));
+  return server;
+}
+
+if (require.main === module) startServer();
+
+module.exports = { app, startServer };
