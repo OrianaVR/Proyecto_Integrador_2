@@ -10,8 +10,7 @@
     "seed": "node src/seed.js",
     "test": "node --test --test-concurrency=1 test/**/*.test.js",
     "test:coverage": "node --test --test-concurrency=1 --experimental-test-coverage test/**/*.test.js",
-    "test:hu01": "node test_hu01.js",
-    "postinstall": "prisma generate"
+    "test:hu01": "node test_hu01.js"
   },
   "engines": {
     "node": ">=20"
