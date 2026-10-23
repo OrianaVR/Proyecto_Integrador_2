@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { ClienteConDetalle, ScoreCategoria } from '@/types';
 import { getErrorMessage } from '@/services/api/client';
+import ProximaCuotaCard from '@/components/fee/nextFeeCard';
 
 const formatCOP=(n:number)=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n);
 
@@ -128,6 +129,9 @@ export default function RiderMiEstadoPage() {
             </div>
           </div>
         </div>
+
+        {/* Próxima cuota (HU-22) */}
+        <ProximaCuotaCard cuota={data.proximaCuota} />
 
         {/* Score */}
         <div className="rounded-2xl border bg-[#1F1F1F]/60 p-5 space-y-3" style={{ borderColor: `${color}30` }}>
