@@ -7,6 +7,9 @@ import { AlertTriangle, CheckCircle2, Clock, TrendingUp, TrendingDown, Minus, Za
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import type { ScoreCategoria } from '@/types';
+import type { ClienteConDetalle } from '@/types';
+import { getErrorMessage } from '@/services/api/client';
+import CuotasPagosPanel from '@/components/fee/feePaymentPage';
 
 const formatCOP=(n:number)=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n);
 const scoreColors: Record<ScoreCategoria, string> = { excelente: '#22c55e', bueno: '#3b82f6', regular: '#eab308', malo: '#ef4444' };
@@ -86,7 +89,7 @@ function TimelineItem({ numeroCuota, monto, fechaVencimiento, fechaPago, estado,
 
 export default function ClienteDetallePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<ClienteConDetalle | null>(null);
   const [error, setError] = useState('');
   const [gpsLoading, setGpsLoading] = useState(false);
   useEffect(() => { getClient(id).then(setData).catch(e => setError(e.response?.data?.error || e.message)); }, [id]);
@@ -98,7 +101,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
 
   const toggleGPS = async () => {
     setGpsLoading(true);
-    try { await setGps(motocicleta.id, gpsState !== 'encendido'); const fresh = await getClient(id); setData(fresh); } catch (e: any) { alert(e.response?.data?.error || e.message); } finally { setGpsLoading(false); }
+    try { await setGps(motocicleta.id, gpsState !== 'encendido'); const fresh = await getClient(id); setData(fresh); } catch (error: unknown) { alert(getErrorMessage(error)); } finally { setGpsLoading(false); }
   };
 
   const gpsOn = gpsState === 'encendido';
@@ -184,6 +187,10 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
             </div>
           </div>
         </div>
+
+        {/* Cuotas y pagos (HU-09, HU-13, HU-16, HU-22) */}
+        <CuotasPagosPanel clienteId={cliente.id} contrato={contrato} proximaCuota={data.proximaCuota}
+          onChanged={() => { getClient(id).then(setData).catch(error => setError(getErrorMessage(error))); }} />
 
         {/* Historial timeline */}
         <div className="rounded-2xl border border-white/8 bg-[#1F1F1F]/60 p-5">

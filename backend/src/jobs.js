@@ -178,13 +178,16 @@ Si no realizas el pago antes del corte, tu motocicleta será apagada.
   }
 
   return { enviadas, total: enviadas.length }
+}
 
 // Weekly liquidation service
 async function runWeeklyLiquidation() {
-  const db = readDb();
+  return updateDb(db => {
   const today = todayISO();
   const results = [];
   for (const contrato of db.contratos) {
+    // runJobs corre cada hora: solo se liquida un contrato si no tiene liquidación en los últimos 7 días
+    if (db.liquidaciones.some(l => l.contratoId === contrato.id && daysBetween(l.fecha, today) < 7)) continue;
     try {
       const cliente = db.clientes.find(c => c.id === contrato.clienteId);
       if (!cliente) throw new Error('Cliente no encontrado');
@@ -232,9 +235,8 @@ async function runWeeklyLiquidation() {
       results.push({ contratoId: contrato.id, total: 0, estado: 'ERROR', error: e.message });
     }
   }
-  updateDb(() => db);
   return results;
-};
+  });
 }
 
 // Modificar runJobs para incluir el nuevo proceso

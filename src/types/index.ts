@@ -21,11 +21,6 @@ export interface Cliente {
   fotoPerfil?: string; ciudad?: string;
   canalPreferido?: NotificationChannel; // nuevo campo
 }
-  id: string; nombre: string; apellido: string; email: string;
-  telefono: string; documentoId: string; plataforma: PlataformaGig;
-  fechaRegistro: string; rol: RolUsuario; activo: boolean;
-  fotoPerfil?: string; ciudad?: string;
-}
 
 export interface DocumentoVehiculo {
   id: string; motocicletaId: string; tipo: TipoDocumento; nombre: string;
@@ -52,9 +47,9 @@ export interface Cuota {
   contratoId: string;
   numeroCuota: number;
   monto: number;
-  montoBase: number;
-  montoMultas: number;
-  montoExcedentes: number;
+  montoBase?: number;
+  montoMultas?: number;
+  montoExcedentes?: number;
   fechaVencimiento: string;
   fechaPago?: string;
   estado: EstadoPago;
@@ -62,13 +57,27 @@ export interface Cuota {
   referencia?: string;
 }
 
+export interface Pago {
+  id: string; contratoId: string; cuotaId?: string; clienteId: string;
+  monto: number; metodoPago: 'efectivo' | 'transferencia' | 'tarjeta' | 'nequi' | 'daviplata';
+  referencia?: string; comprobante?: string; registradoPor: string;
+  fechaPago: string; notas?: string;
+}
+
+export interface ScoreCredito {
+  clienteId: string; puntaje: number; categoria: ScoreCategoria;
+  porcentajePuntual: number; diasPromedioMora: number;
+  cuotasPagadas: number; cuotasTotales: number;
+  ultimaActualizacion: string; tendencia: 'subiendo' | 'bajando' | 'estable';
+}
+
 export interface HistorialPago {
   cuotaId: string;
   numeroCuota: number;
   monto: number;
-  montoBase: number;
-  montoMultas: number;
-  montoExcedentes: number;
+  montoBase?: number;
+  montoMultas?: number;
+  montoExcedentes?: number;
   fechaVencimiento: string;
   fechaPago?: string;
   estado: EstadoPago;
@@ -95,10 +104,18 @@ export interface ComandoGPS {
 }
 
 export interface ClienteConDetalle {
-  cliente: Cliente; motocicleta: Motocicleta;
-  contrato: Contrato; score: ScoreCredito;
+  cliente: Cliente; motocicleta: Motocicleta | null;
+  contrato: Contrato | null; score: ScoreCredito | null;
   diasMora: number; proximaCuota: Cuota | null;
+  historial: HistorialPago[];
 }
+
+export type UsuarioAutenticado = Partial<Cliente> & {
+  id: string;
+  email: string;
+  rol: RolUsuario;
+  clienteId?: string | null;
+};
 
 export interface PaginatedResponse<T> {
   data: T[]; total: number; page: number; limit: number; totalPages: number;

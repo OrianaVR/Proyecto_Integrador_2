@@ -13,6 +13,7 @@ import {
   downloadFinancialReportPdf,
   downloadFinancialReportExcel,
 } from '@/services/api/endpoints';
+import { getErrorMessage } from '@/services/api/client';
 import type { ReporteFinanciero } from '@/types';
 
 // Formateador de moneda en pesos colombianos (COP)
@@ -104,16 +105,18 @@ export default function ReportesFinancierosPage() {
         periodo: preset,
       });
       setReporte(data);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error generando reporte:', err);
-      setErrorMsg(err.response?.data?.error || err.message || 'Error al procesar el reporte financiero.');
+      setErrorMsg(getErrorMessage(err, 'Error al procesar el reporte financiero.'));
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    handleGenerarReporte(defaultDates.inicio, defaultDates.fin, 'mensual');
+    // Se difiere la primera carga para no actualizar el estado de forma síncrona dentro del efecto
+    const timer = setTimeout(() => handleGenerarReporte(defaultDates.inicio, defaultDates.fin, 'mensual'), 0);
+    return () => clearTimeout(timer);
   }, [defaultDates]);
 
   const handleSelectPreset = (preset: 'semanal' | 'mensual' | 'mes_anterior' | 'ultimos_30' | 'sin_datos') => {
@@ -133,8 +136,8 @@ export default function ReportesFinancierosPage() {
         fechaFin,
         periodo: periodoPreset,
       });
-    } catch (err: any) {
-      alert(err.message || 'Error al exportar PDF');
+    } catch (err: unknown) {
+      alert(getErrorMessage(err, 'Error al exportar PDF'));
     } finally {
       setExportingPdf(false);
     }
@@ -149,8 +152,8 @@ export default function ReportesFinancierosPage() {
         fechaFin,
         periodo: periodoPreset,
       });
-    } catch (err: any) {
-      alert(err.message || 'Error al exportar Excel');
+    } catch (err: unknown) {
+      alert(getErrorMessage(err, 'Error al exportar Excel'));
     } finally {
       setExportingExcel(false);
     }

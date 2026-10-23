@@ -37,7 +37,7 @@ async function sendMessagingProvider({ canal = 'whatsapp', destinatario, mensaje
         },
         body: JSON.stringify({
           messaging_product: 'whatsapp',
-          to: destinatario?.replace(/\\D/g, '') || '',
+          to: destinatario?.replace(/\D/g, '') || '',
           type: 'text',
           text: { body: mensaje },
         }),
@@ -111,74 +111,6 @@ async function sendMessagingProvider({ canal = 'whatsapp', destinatario, mensaje
   console.log(`"${mensaje}"`);
   return { sent: true, status: 200, provider: `${canal}_service`, messageId: simulatedId, timestamp: new Date().toISOString() };
 }
-  const provider = (process.env.MESSAGING_PROVIDER || 'whatsapp').toLowerCase();
-  const n8nUrl = process.env.N8N_WEBHOOK_URL;
-  const whatsappApiUrl = process.env.WHATSAPP_API_URL;
-  const whatsappToken = process.env.WHATSAPP_API_TOKEN;
-
-  // 1. Integración directa con WhatsApp Cloud API / Meta Graph API
-  if (canal === 'whatsapp' && whatsappApiUrl && whatsappToken) {
-    try {
-      const response = await fetch(whatsappApiUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${whatsappToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          messaging_product: 'whatsapp',
-          to: destinatario?.replace(/\D/g, '') || '',
-          type: 'text',
-          text: { body: mensaje },
-        }),
-      });
-      const data = await response.json();
-      return {
-        sent: response.ok,
-        status: response.status,
-        provider: 'whatsapp_cloud_api',
-        messageId: data.messages?.[0]?.id || `wa-${Date.now()}`,
-        response: data,
-      };
-    } catch (error) {
-      console.error('[WhatsApp API Error]:', error.message);
-      return { sent: false, provider: 'whatsapp_cloud_api', error: error.message };
-    }
-  }
-
-  // 2. Integración mediante Webhook de n8n (para automatizaciones complejas)
-  if (n8nUrl) {
-    try {
-      const response = await fetch(n8nUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ canal, destinatario, mensaje, metadata, timestamp: new Date().toISOString() }),
-      });
-      return {
-        sent: response.ok,
-        status: response.status,
-        provider: 'n8n_webhook',
-        messageId: `n8n-${Date.now()}`,
-      };
-    } catch (error) {
-      console.error('[n8n Webhook Error]:', error.message);
-      return { sent: false, provider: 'n8n_webhook', error: error.message };
-    }
-  }
-
-  // 3. Modo proveedor estándar / simulador oficial (para pruebas y entorno local)
-  const simulatedId = `msg-${canal}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  console.log(`[Mensajería ${canal.toUpperCase()} Enviada a ${destinatario}]:`);
-  console.log(`"${mensaje}"`);
-
-  return {
-    sent: true,
-    status: 200,
-    provider: `${canal}_service`,
-    messageId: simulatedId,
-    timestamp: new Date().toISOString(),
-  };
-}
 
 /**
  * Crea y registra un recordatorio formal de cobro automático con el monto a pagar
@@ -186,10 +118,12 @@ async function sendMessagingProvider({ canal = 'whatsapp', destinatario, mensaje
 async function enviarRecordatorioCobro({ cliente, contrato, cuota, motocicleta }) {
   if (!cliente || !cuota) throw new Error('Cliente y cuota son obligatorios para el recordatorio');
 
-  const montoBase = formatCOP(cuota.montoBase);
-  const montoMultas = formatCOP(cuota.montoMultas);
-  const montoExcedentes = formatCOP(cuota.montoExcedentes);
-  const totalMonto = formatCOP(cuota.montoBase + cuota.montoMultas + cuota.montoExcedentes);
+  // Las cuotas sin desglose (p. ej. las del seed) usan su monto como base
+  const base = Number(cuota.montoBase ?? cuota.monto), multas = Number(cuota.montoMultas ?? 0), excedentes = Number(cuota.montoExcedentes ?? 0);
+  const montoBase = formatCOP(base);
+  const montoMultas = formatCOP(multas);
+  const montoExcedentes = formatCOP(excedentes);
+  const totalMonto = formatCOP(base + multas + excedentes);
   const canalPreferido = cliente.canalPreferido || (process.env.MESSAGING_CHANNEL || 'whatsapp');
   const telefono = cliente.telefono || 'Sin número';
   const email = cliente.email;
@@ -208,12 +142,12 @@ async function enviarRecordatorioCobro({ cliente, contrato, cuota, motocicleta }
   ].join('\n');
 
   // Determinar orden de canales (preferido primero, luego los demás)
-  const allChannels: NotificationChannel[] = ['whatsapp', 'sms', 'email'];
-  const channelsToTry = [canalPreferido as NotificationChannel, ...allChannels.filter(c => c !== canalPreferido)];
+  const allChannels = ['whatsapp', 'sms', 'email'];
+  const channelsToTry = [canalPreferido, ...allChannels.filter(c => c !== canalPreferido)];
 
-  let providerResult: any = null;
+  let providerResult = null;
   let intentos = 0;
-  let ultimoError: string | undefined = undefined;
+  let ultimoError = undefined;
   for (const canal of channelsToTry) {
     intentos++;
     const destinatario = canal === 'email' ? email : telefono;
@@ -241,68 +175,6 @@ async function enviarRecordatorioCobro({ cliente, contrato, cuota, motocicleta }
     fecha: new Date().toISOString(),
     error: providerResult?.sent ? undefined : ultimoError,
     intentos,
-  };
-
-  updateDb(db => {
-    if (!db.notificaciones) db.notificaciones = [];
-    db.notificaciones.push(notificacion);
-  });
-
-  return notificacion;
-}
-  if (!cliente || !cuota) throw new Error('Cliente y cuota son obligatorios para el recordatorio');
-
-  const montoBase = formatCOP(cuota.montoBase);
-  const montoMultas = formatCOP(cuota.montoMultas);
-  const montoExcedentes = formatCOP(cuota.montoExcedentes);
-  const totalMonto = formatCOP(cuota.montoBase + cuota.montoMultas + cuota.montoExcedentes);
-  const canal = process.env.MESSAGING_CHANNEL || 'whatsapp';
-  const telefono = cliente.telefono || 'Sin número';
-
-  const mensaje = [
-    `🏍️ *Recordatorio de Cobro - MotoLeasing*`,
-    `Hola ${cliente.nombre}, hoy es tu fecha programada de cobro de tu leasing.`,
-    `📌 *Cuota:* #${cuota.numeroCuota}`,
-    `🛵 *Motocicleta:* ${motocicleta ? `${motocicleta.marca} ${motocicleta.modelo} (${motocicleta.placa})` : 'Asignada'}`,
-    `💰 *Monto base:* ${montoBase}`,
-    `⚖️ *Multas:* ${montoMultas}`,
-    `📈 *Excedentes:* ${montoExcedentes}`,
-    `🧾 *Total a pagar:* ${totalMonto}`,
-    `📅 *Fecha de vencimiento:* ${cuota.fechaVencimiento}`,
-    `Recuerda realizar tu pago oportunamente a través de Nequi, Daviplata o Transferencia para mantener tu servicio GPS activo y cuidar tu score crediticio.`,
-  ].join('\n');
-
-
-  // Enviar a través del proveedor de mensajería
-  const providerResult = await sendMessagingProvider({
-    canal,
-    destinatario: telefono,
-    mensaje,
-    metadata: {
-      clienteId: cliente.id,
-      contratoId: contrato?.id,
-      cuotaId: cuota.id,
-      monto: cuota.monto,
-      numeroCuota: cuota.numeroCuota,
-    },
-  });
-
-  // Registrar en el historial del cliente (db.notificaciones)
-  const notificacion = {
-    id: id('not'),
-    clienteId: cliente.id,
-    contratoId: contrato?.id || null,
-    cuotaId: cuota.id,
-    tipo: 'cobro',
-    canal,
-    destinatario: telefono,
-    titulo: `Recordatorio de cuota #${cuota.numeroCuota}`,
-    mensaje,
-    monto: Number(cuota.monto),
-    estado: providerResult.sent ? 'enviado' : 'fallido',
-    proveedor: providerResult.provider || canal,
-    messageId: providerResult.messageId || null,
-    fecha: new Date().toISOString(),
   };
 
   updateDb(db => {

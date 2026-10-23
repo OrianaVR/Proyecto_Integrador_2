@@ -7,7 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const { readDb, updateDb, ensureDb } = require('./db');
 const { signToken, authenticate, authorize } = require('./auth');
-const { id, addDays, daysBetween, calculateScore } = require('./utils');
+const { id, calculateScore } = require('./utils');
 const { createNotification } = require('./notifications');
 const { runJobs, processAutomaticCollection } = require('./jobs');
 const { seed } = require('./seed');
@@ -16,7 +16,9 @@ const { generarReporteFinanciero, exportarReportePDF, exportarReporteExcel } = r
 ensureDb();
 const app = express();
 const PORT = Number(process.env.PORT || 3001);
-const uploadDir = path.join(__dirname, '..', 'uploads');
+const uploadDir = process.env.MOTOLEASING_UPLOAD_DIR
+  ? path.resolve(process.env.MOTOLEASING_UPLOAD_DIR)
+  : path.join(__dirname, '..', 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const storage = multer.diskStorage({
@@ -24,7 +26,7 @@ const storage = multer.diskStorage({
   filename: (_req, file, cb) => cb(null, `${Date.now()}-${file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')}`),
 });
 const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png'];
-const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_req, file, cb) => ALLOWED_TYPES.includes(file.mimetype) ? cb(null, true) : cb(new Error('INVALID_FILE_TYPE')) });
+const upload = multer({ storage, defParamCharset: 'utf8', limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_req, file, cb) => ALLOWED_TYPES.includes(file.mimetype) ? cb(null, true) : cb(new Error('INVALID_FILE_TYPE')) });
 
 app.use(cors({ origin: process.env.FRONTEND_URL || true, credentials: true }));
 app.use(express.json({ limit: '2mb' }));
@@ -48,7 +50,7 @@ function clienteDetalle(db, clienteId) {
   const cuotas = contrato ? db.cuotas.filter(c => c.contratoId === contrato.id) : [];
   const proximaCuota = cuotas.find(c => c.estado === 'pendiente') || cuotas.find(c => c.estado === 'vencido') || null;
   const diasMora = cuotas.reduce((max, c) => Math.max(max, c.diasMorosidad || 0), 0);
-  return { cliente, motocicleta, contrato, score, diasMora, proximaCuota, historial: cuotas.map(c => ({ cuotaId:c.id, numeroCuota:c.numeroCuota, monto:c.monto, montoBase:c.montoBase, montoMultas:c.montoMultas, montoExcedentes:c.montoExcedentes, fechaVencimiento:c.fechaVencimiento, fechaPago:c.fechaPago, estado:c.estado, diasDiferencia:c.fechaPago ? Math.round((new Date(c.fechaPago)-new Date(c.fechaVencimiento))/86400000) : c.diasMorosidad || 0 })), multas: db.multas.filter(m => m.clienteId === clienteId), cargos: db.cargos.filter(c => c.clienteId === clienteId) };
+  return { cliente, motocicleta, contrato, score, diasMora, proximaCuota, historial: cuotas.map(c => ({ cuotaId:c.id, numeroCuota:c.numeroCuota, monto:c.monto, montoBase:c.montoBase, montoMultas:c.montoMultas, montoExcedentes:c.montoExcedentes, fechaVencimiento:c.fechaVencimiento, fechaPago:c.fechaPago, estado:c.estado, diasDiferencia:c.fechaPago ? Math.round((new Date(c.fechaPago)-new Date(c.fechaVencimiento))/86400000) : c.diasMorosidad || 0 })), multas: (db.multas || []).filter(m => m.clienteId === clienteId), cargos: (db.cargos || []).filter(c => c.clienteId === clienteId) };
 }
 
 // ───────────────────────────────── AUTH ─────────────────────────────────────
@@ -98,22 +100,33 @@ app.get('/api/clientes/:id', authenticate, (req,res)=>{
   const detalle=clienteDetalle(readDb(),req.params.id); if(!detalle) return fail(res,404,'Cliente no encontrado'); ok(res,detalle);
 });
 
-app.post('/api/clientes', authenticate, authorize('admin'), (req,res)=>{
-  const body=req.body; const missing=validateRequired(body,['nombre','apellido','email','telefono','documentoId','plataforma','ciudad','marca','modelo','año','placa','numeroSerie','color','montoSemanal','cuotasTotales','fechaInicio','fechaFin']); if(missing) return fail(res,400,`El campo ${missing} es obligatorio`);
-  const result=updateDb(db=>{
-    if(db.clientes.some(c=>c.email.toLowerCase()===String(body.email).toLowerCase())) throw new Error('EMAIL_EXISTS');
+const DOCUMENT_KEYS = ['cedula', 'contrato_firmado', 'soat', 'tecnomecanica', 'tarjeta_propiedad', 'licencia'];
+
+function discardUploads(req) {
+  for (const file of Object.values(req.files || {}).flat()) fs.rmSync(file.path, { force: true });
+}
+
+app.post('/api/clientes', authenticate, authorize('admin'), upload.fields(DOCUMENT_KEYS.map(name => ({ name, maxCount: 1 }))), async (req,res)=>{
+  const body=req.body; const missing=validateRequired(body,['nombre','apellido','email','telefono','documentoId','plataforma','ciudad','marca','modelo','año','placa','numeroSerie','color','montoSemanal','cuotasTotales','fechaInicio','fechaFin']); if(missing) { discardUploads(req); return fail(res,400,`El campo ${missing} es obligatorio`); }
+  // Contraseña inicial del rider: su número de documento
+  const passwordHash=await bcrypt.hash(String(body.documentoId),12);
+  let result;
+  try { result=updateDb(db=>{
+    if(db.clientes.some(c=>c.email.toLowerCase()===String(body.email).toLowerCase()) || db.usuarios.some(u=>u.email.toLowerCase()===String(body.email).toLowerCase())) throw new Error('EMAIL_EXISTS');
     if(db.clientes.some(c=>c.documentoId===String(body.documentoId))) throw new Error('DOC_EXISTS');
     if(db.motocicletas.some(m=>m.placa===String(body.placa).toUpperCase())) throw new Error('PLATE_EXISTS');
     if(body.dispositivoGPS && db.motocicletas.some(m=>m.dispositivoGPS===String(body.dispositivoGPS))) throw new Error('GPS_EXISTS');
     const clienteId=id('c'), motoId=id('m'), contratoId=id('ct');
     const cliente={id:clienteId,nombre:body.nombre,apellido:body.apellido,email:body.email,telefono:body.telefono,documentoId:String(body.documentoId),plataforma:body.plataforma,fechaRegistro:new Date().toISOString().slice(0,10),rol:'rider',activo:true,ciudad:body.ciudad};
     const moto={id:motoId,marca:body.marca,modelo:body.modelo,año:Number(body.año),placa:String(body.placa).toUpperCase(),numeroSerie:body.numeroSerie,color:body.color,estadoGPS:'apagado',dispositivoGPS:body.dispositivoGPS||null,disponible:true,clienteId:clienteId,creadoEn:new Date().toISOString(),vencimientoSOAT:body.vencimientoSOAT||null,vencimientoTecno:body.vencimientoTecno||null,documentos:[]};
+    for (const [tipo, [file]] of Object.entries(req.files || {})) moto.documentos.push({id:id('doc'),motocicletaId:motoId,tipo,nombre:file.originalname,url:`/uploads/${file.filename}`,fechaSubida:new Date().toISOString(),subidoPor:req.user.id});
     const monto=Number(body.montoSemanal), cuotas=Number(body.cuotasTotales), total=monto*cuotas;
     const contrato={id:contratoId,clienteId,motocicletaId:motoId,estado:'activo',fechaInicio:body.fechaInicio,fechaFin:body.fechaFin,montoSemanal:monto,totalContrato:total,saldoPendiente:total,cuotasTotales:cuotas,cuotasPagadas:0,observaciones:body.observaciones||null,creadoEn:new Date().toISOString(),actualizadoEn:new Date().toISOString()};
     db.clientes.push(cliente); db.motocicletas.push(moto); db.contratos.push(contrato);
     db.scores.push({...calculateScore([]),clienteId,cuotasPagadas:0,cuotasTotales:cuotas,ultimaActualizacion:new Date().toISOString().slice(0,10)});
+    db.usuarios.push({id:id('user'),email:body.email,passwordHash,rol:'rider',clienteId,activo:true});
     return {cliente,moto,contrato};
-  });
+  }); } catch (e) { discardUploads(req); throw e; }
   ok(res,result,'Cliente, motocicleta y contrato registrados');
 });
 
@@ -129,7 +142,9 @@ app.post('/api/cuotas', authenticate, authorize('admin'), async (req,res)=>{
   const result=updateDb(db=>{
     const contrato=db.contratos.find(c=>c.id===contratoId); if(!contrato) throw new Error('CONTRACT_NOT_FOUND');
     if(db.cuotas.some(c=>c.contratoId===contratoId && c.numeroCuota===Number(numeroCuota))) throw new Error('FEE_EXISTS');
-    const cuota={id:id('cuota'),contratoId,numeroCuota:Number(numeroCuota),monto:Number(monto),montoBase:Number(monto),montoMultas:0,montoExcedentes:0,fechaVencimiento,fechaPago:null,estado:'pendiente',diasMorosidad:0,referencia:null}; db.cuotas.push(cuota); contrato.cuotasTotales=Math.max(contrato.cuotasTotales,Number(numeroCuota)); contrato.totalContrato=contrato.montoSemanal*contrato.cuotasTotales; contrato.saldoPendiente += Number(monto); contrato.actualizadoEn=new Date().toISOString(); return cuota;
+    // Desglose (HU-02): el formulario envía montoBase, multas y excedentes
+    const cuota={id:id('cuota'),contratoId,numeroCuota:Number(numeroCuota),monto:Number(monto),montoBase:Number(req.body.montoBase ?? monto),montoMultas:Number(req.body.multas ?? req.body.montoMultas ?? 0),montoExcedentes:Number(req.body.excedentes ?? req.body.montoExcedentes ?? 0),fechaVencimiento,fechaPago:null,estado:'pendiente',diasMorosidad:0,referencia:null}; db.cuotas.push(cuota); // Una cuota dentro del plazo del contrato ya está incluida en el total (por montoSemanal): solo se suma la diferencia
+    const incluido=Number(numeroCuota)<=contrato.cuotasTotales?contrato.montoSemanal:0, diferencia=Number(monto)-incluido; contrato.cuotasTotales=Math.max(contrato.cuotasTotales,Number(numeroCuota)); contrato.totalContrato += diferencia; contrato.saldoPendiente += diferencia; contrato.actualizadoEn=new Date().toISOString(); return cuota;
   });
   const contrato=readDb().contratos.find(c=>c.id===contratoId); if(contrato) await createNotification({clienteId:contrato.clienteId,contratoId,cuotaId:result.id,tipo:'cuota_registrada',titulo:'Nueva cuota registrada',mensaje:`Se registró la cuota #${result.numeroCuota} por $${result.monto.toLocaleString('es-CO')}.`});
   ok(res,result,'Cuota semanal registrada');
@@ -196,17 +211,21 @@ app.get('/api/multas/cliente/:clienteId', authenticate, (req, res) => {
 app.patch('/api/multas/:id/pagar', authenticate, authorize('admin'), (req, res) => {
   const { id } = req.params;
   const db = readDb();
-  const multa = db.multas.find(m => m.id === id);
-  if (!multa) return fail(res, 404, 'Multa no encontrada');
-  if (multa.pagada) return fail(res, 400, 'Multa ya está pagada');
-  // Ajustar saldo pendiente del contrato si está asociado
-  if (multa.contratoId) {
-    const contrato = db.contratos.find(c => c.id === multa.contratoId);
-    if (contrato) {
-      contrato.saldoPendiente = Math.max(0, Number(contrato.saldoPendiente) - Number(multa.monto));
+  const existente = db.multas.find(m => m.id === id);
+  if (!existente) return fail(res, 404, 'Multa no encontrada');
+  if (existente.pagada) return fail(res, 400, 'Multa ya está pagada');
+  const multa = updateDb(db => {
+    const multa = db.multas.find(m => m.id === id);
+    // Ajustar saldo pendiente del contrato si está asociado
+    if (multa.contratoId) {
+      const contrato = db.contratos.find(c => c.id === multa.contratoId);
+      if (contrato) {
+        contrato.saldoPendiente = Math.max(0, Number(contrato.saldoPendiente) - Number(multa.monto));
+      }
     }
-  }
-  multa.pagada = true;
+    multa.pagada = true;
+    return multa;
+  });
   ok(res, multa, 'Multa marcada como pagada');
 });
 app.get('/api/pagos/cliente/:clienteId', authenticate, (req,res)=>{
@@ -253,14 +272,18 @@ app.get('/api/cargos-adicionales/cliente/:clienteId', authenticate, (req, res) =
 app.patch('/api/cargos-adicionales/:id/pagar', authenticate, authorize('admin'), (req, res) => {
   const { id } = req.params;
   const db = readDb();
-  const cargo = db.cargos.find(c => c.id === id);
-  if (!cargo) return fail(res, 404, 'Cargo no encontrado');
-  if (cargo.pagada) return fail(res, 400, 'Cargo ya está pagado');
-  if (cargo.contratoId) {
-    const contrato = db.contratos.find(c => c.id === cargo.contratoId);
-    if (contrato) contrato.saldoPendiente = Math.max(0, Number(contrato.saldoPendiente) - Number(cargo.monto));
-  }
-  cargo.pagada = true;
+  const existente = db.cargos.find(c => c.id === id);
+  if (!existente) return fail(res, 404, 'Cargo no encontrado');
+  if (existente.pagada) return fail(res, 400, 'Cargo ya está pagado');
+  const cargo = updateDb(db => {
+    const cargo = db.cargos.find(c => c.id === id);
+    if (cargo.contratoId) {
+      const contrato = db.contratos.find(c => c.id === cargo.contratoId);
+      if (contrato) contrato.saldoPendiente = Math.max(0, Number(contrato.saldoPendiente) - Number(cargo.monto));
+    }
+    cargo.pagada = true;
+    return cargo;
+  });
   ok(res, cargo, 'Cargo marcado como pagado');
 });
 
@@ -277,28 +300,44 @@ app.patch('/api/pagos/:id/aprobar', authenticate, authorize('admin'), async (req
   const pago = db.pagos.find(p => p.id === id);
   if (!pago) return fail(res, 404, 'Pago no encontrado');
   if (pago.estado !== 'PENDIENTE') return fail(res, 400, 'Pago no está pendiente');
-  if (pago.contratoId) {
-    const contrato = db.contratos.find(c => c.id === pago.contratoId);
-    if (contrato) contrato.saldoPendiente = Math.max(0, Number(contrato.saldoPendiente) - Number(pago.monto));
-  }
-  pago.estado = 'APROBADO';
-  await encenderMotoIfMora(pago);
-  ok(res, pago, 'Pago aprobado');
+  // El saldo, la cuota y el score ya se actualizaron al registrar el pago (POST /api/pagos): aquí solo se confirma
+  const aprobado = updateDb(db => {
+    const pago = db.pagos.find(p => p.id === id);
+    pago.estado = 'APROBADO';
+    return pago;
+  });
+  await encenderMotoIfMora(aprobado);
+  ok(res, aprobado, 'Pago aprobado');
 });
 
 app.patch('/api/pagos/:id/rechazar', authenticate, authorize('admin'), (req, res) => {
   const { id } = req.params;
   const { razon } = req.body;
   const db = readDb();
-  const pago = db.pagos.find(p => p.id === id);
-  if (!pago) return fail(res, 404, 'Pago no encontrado');
-  if (pago.estado !== 'PENDIENTE') return fail(res, 400, 'Pago no está pendiente');
-  pago.estado = 'RECHAZADO';
-  if (razon) pago.razonRechazo = razon;
+  const existente = db.pagos.find(p => p.id === id);
+  if (!existente) return fail(res, 404, 'Pago no encontrado');
+  if (existente.estado !== 'PENDIENTE') return fail(res, 400, 'Pago no está pendiente');
+  const pago = updateDb(db => {
+    const pago = db.pagos.find(p => p.id === id);
+    pago.estado = 'RECHAZADO';
+    if (razon) pago.razonRechazo = razon;
+    // El pago se aplicó al registrarlo: al rechazarlo se revierte (saldo, cuota y score)
+    const contrato = db.contratos.find(c => c.id === pago.contratoId);
+    if (contrato) {
+      contrato.saldoPendiente = Number(contrato.saldoPendiente) + Number(pago.monto);
+      const cuota = pago.cuotaId ? db.cuotas.find(c => c.id === pago.cuotaId) : null;
+      if (cuota && cuota.estado === 'pagado') {
+        cuota.estado = new Date(`${cuota.fechaVencimiento}T23:59:59`) < new Date() ? 'vencido' : 'pendiente';
+        cuota.fechaPago = null;
+        contrato.cuotasPagadas = Math.max(0, contrato.cuotasPagadas - 1);
+      }
+      contrato.actualizadoEn = new Date().toISOString();
+      const cuotas=db.cuotas.filter(c=>c.contratoId===contrato.id); const score=calculateScore(cuotas); const old=db.scores.find(s=>s.clienteId===contrato.clienteId); db.scores=db.scores.filter(s=>s.clienteId!==contrato.clienteId); db.scores.push({...old,...score,clienteId:contrato.clienteId,cuotasPagadas:contrato.cuotasPagadas,cuotasTotales:contrato.cuotasTotales,ultimaActualizacion:new Date().toISOString().slice(0,10)});
+    }
+    return pago;
+  });
   ok(res, pago, 'Pago rechazado');
 });
-
-// ───────────────────────────── GPS / MOTOS ──────────────────────────────────
 
 // ───────────────────────────── GPS / MOTOS ──────────────────────────────────
 app.get('/api/motocicletas', authenticate, authorize('admin'), (req,res)=>{
@@ -341,13 +380,16 @@ async function encenderMoto(motoId, attempt = 0){
   if (!moto) throw new Error('MOTO_NOT_FOUND');
   if (moto.estadoGPS === 'sin_señal') throw new Error('GPS_NO_SIGNAL');
   try {
-    // Simular llamada al proveedor GPS (still unavailable)
-    moto.estadoGPS = 'encendido';
-    moto.actualizadoEn = new Date().toISOString();
-    const command = { id: id('gps'), motocicletaId: moto.id, accion: 'encender', solicitadoPor: 'system-auto', timestamp: new Date().toISOString(), resultado: 'exitoso' };
-    db.comandosGPS.push(command);
+    // Simular llamada al proveedor GPS (still unavailable) y persistir los cambios
+    const contrato = updateDb(db => {
+      const moto = db.motocicletas.find(m => m.id === motoId);
+      moto.estadoGPS = 'encendido';
+      moto.actualizadoEn = new Date().toISOString();
+      const command = { id: id('gps'), motocicletaId: moto.id, accion: 'encender', solicitadoPor: 'system-auto', timestamp: new Date().toISOString(), resultado: 'exitoso' };
+      db.comandosGPS.push(command);
+      return db.contratos.find(c => c.motocicletaId === moto.id);
+    });
     // Notificar al cliente
-    const contrato = db.contratos.find(c => c.motocicletaId === moto.id);
     if (contrato) {
       const cliente = db.clientes.find(cl => cl.id === contrato.clienteId);
       if (cliente) {
@@ -359,52 +401,11 @@ async function encenderMoto(motoId, attempt = 0){
         });
       }
     }
-    // Persistir cambios
-    updateDb(() => db);
     return;
   } catch (e) {
     // Log error
     const log = { id: id('log'), nivel: 'ERROR', mensaje: `Error al encender moto ${motoId}: ${e.message}`, timestamp: new Date().toISOString() };
-    db.logs.push(log);
-    if (attempt + 1 < MAX_ATTEMPTS) {
-      // retry after short delay
-      await new Promise(r => setTimeout(r, 500));
-      return encenderMoto(motoId, attempt + 1);
-    }
-    throw e;
-  }
-}
-  const MAX_ATTEMPTS = 3;
-  const db = readDb();
-  const moto = db.motocicletas.find(m => m.id === motoId);
-  if (!moto) throw new Error('MOTO_NOT_FOUND');
-  if (moto.estadoGPS === 'sin_señal') throw new Error('GPS_NO_SIGNAL');
-  try {
-    // Simular llamada al proveedor GPS (still unavailable)
-    moto.estadoGPS = 'encendido';
-    moto.actualizadoEn = new Date().toISOString();
-    const command = { id: id('gps'), motocicletaId: moto.id, accion: 'encender', solicitadoPor: 'system-auto', timestamp: new Date().toISOString(), resultado: 'exitoso' };
-    db.comandosGPS.push(command);
-    // Notificar al cliente
-    const contrato = db.contratos.find(c => c.motocicletaId === moto.id);
-    if (contrato) {
-      const cliente = db.clientes.find(cl => cl.id === contrato.clienteId);
-      if (cliente) {
-        await createNotification({
-          clienteId: cliente.id,
-          tipo: 'reconexion',
-          titulo: 'Moto reconectada',
-          mensaje: `Su motocicleta ${moto.placa} ha sido encendida automáticamente tras la confirmación de pago.`
-        });
-      }
-    }
-    // Persistir cambios
-    updateDb(() => db);
-    return;
-  } catch (e) {
-    // Log error
-    const log = { id: id('log'), nivel: 'ERROR', mensaje: `Error al encender moto ${motoId}: ${e.message}`, timestamp: new Date().toISOString() };
-    db.logs.push(log);
+    updateDb(db => { db.logs.push(log); });
     if (attempt + 1 < MAX_ATTEMPTS) {
       // retry after short delay
       await new Promise(r => setTimeout(r, 500));
@@ -421,6 +422,7 @@ async function crearAlertaFallo({ clienteId, motoId, tipo, error }) {
     id: id('alerta'),
     clienteId,
     motoId,
+    motocicletaId: motoId,
     tipo,
     error,
     creadoEn: new Date().toISOString(),
@@ -444,6 +446,9 @@ async function crearAlertaFallo({ clienteId, motoId, tipo, error }) {
 
 // Endpoint para recibir webhook externo (p.ej. N8N) cuando se aprueba un pago
 app.post('/api/webhooks/pago-aprobado', async (req, res) => {
+  // El webhook no usa JWT: se protege con una clave compartida (header x-webhook-secret = WEBHOOK_SECRET del .env)
+  if (!process.env.WEBHOOK_SECRET) return fail(res, 503, 'El webhook no está configurado');
+  if (req.get('x-webhook-secret') !== process.env.WEBHOOK_SECRET) return fail(res, 401, 'Webhook no autorizado');
   const { pagoId } = req.body;
   if (!pagoId) return fail(res, 400, 'pagoId es requerido');
   const db = readDb();
@@ -456,50 +461,12 @@ app.post('/api/webhooks/pago-aprobado', async (req, res) => {
   } catch (e) {
     // Registrar log de error
     const log = { id: id('log'), nivel: 'ERROR', mensaje: `Error en webhook pago-aprobado para pago ${pagoId}: ${e.message}`, timestamp: new Date().toISOString() };
-    db.logs.push(log);
-    fail(res, 500, 'Error procesando encendido');
-  }
-});
-app.post('/api/webhooks/pago-aprobado', async (req, res) => {
-  const { pagoId } = req.body;
-  if (!pagoId) return fail(res, 400, 'pagoId es requerido');
-  const db = readDb();
-  const pago = db.pagos.find(p=>p.id===pagoId);
-  if (!pago) return fail(res, 404, 'Pago no encontrado');
-  if (pago.estado !== 'APROBADO') return fail(res, 400, 'Pago no está aprobado');
-  try {
-    await encenderMotoIfMora(pago);
-    ok(res, {msg:'Comando de encendido procesado (si correspondía)'}, 'Webhook procesado');
-  } catch (e) {
-    // Registrar log de error
-    const log = { id: id('log'), nivel: 'ERROR', mensaje: `Error en webhook pago-aprobado para pago ${pagoId}: ${e.message}`, timestamp: new Date().toISOString() };
-    db.logs.push(log);
+    updateDb(db => { db.logs.push(log); });
     fail(res, 500, 'Error procesando encendido');
   }
 });
 app.post('/api/motocicletas/:id/gps/encender', authenticate, authorize('admin'), (req,res)=>setGps(req,res,'encendido').catch(e=>fail(res,e.message==='MOTO_NOT_FOUND'?404:409,e.message==='GPS_NO_SIGNAL'?'La motocicleta no tiene señal GPS':e.message)));
 app.post('/api/motocicletas/:id/gps/apagar', authenticate, authorize('admin'), (req,res)=>setGps(req,res,'apagado').catch(e=>fail(res,e.message==='MOTO_NOT_FOUND'?404:409,e.message)));
-
-// ───────────────────────────── MANUAL PAYMENT VERIFICATION ──────────────────────────────
-app.get('/api/pagos/pendientes', authenticate, authorize('admin'), (req, res) => {
-  const db = readDb();
-  const pending = db.pagos.filter(p => p.estado === 'PENDIENTE');
-  ok(res, pending);
-});
-
-
-
-app.patch('/api/pagos/:id/rechazar', authenticate, authorize('admin'), (req, res) => {
-  const { id } = req.params;
-  const { razon } = req.body;
-  const db = readDb();
-  const pago = db.pagos.find(p => p.id === id);
-  if (!pago) return fail(res, 404, 'Pago no encontrado');
-  if (pago.estado !== 'PENDIENTE') return fail(res, 400, 'Pago no está pendiente');
-  pago.estado = 'RECHAZADO';
-  if (razon) pago.razonRechazo = razon;
-  ok(res, pago, 'Pago rechazado');
-});
 
 // ───────────────────────────── ALERTAS ADMINISTRATIVAS ──────────────────────────────
 // Listar alertas pendientes (solo admin)
@@ -513,17 +480,21 @@ app.get('/api/alertas/pending', authenticate, authorize('admin'), (req, res) => 
 app.patch('/api/alertas/:id/resolver', authenticate, authorize('admin'), (req, res) => {
   const { id } = req.params;
   const db = readDb();
-  const alerta = db.alertas.find(a => a.id === id);
-  if (!alerta) return fail(res, 404, 'Alerta no encontrada');
-  alerta.atendida = true;
-  alerta.atendidaEn = new Date().toISOString();
+  if (!db.alertas.some(a => a.id === id)) return fail(res, 404, 'Alerta no encontrada');
+  const alerta = updateDb(db => {
+    const alerta = db.alertas.find(a => a.id === id);
+    alerta.atendida = true;
+    alerta.atendidaEn = new Date().toISOString();
+    return alerta;
+  });
   ok(res, alerta, 'Alerta marcada como atendida');
 });
 
 // Mantener rutas existentes de desactivación para compatibilidad
 // ───────────────────────────── DESACTIVACIONES ──────────────────────────────
 app.get('/api/alertas/desactivacion', authenticate, authorize('admin'), (req,res)=>{
-  const db=readDb(); const data=db.alertas.filter(a=>!a.atendida).map(a=>({...a,cliente:db.clientes.find(c=>c.id===a.clienteId),motocicleta:db.motocicletas.find(m=>m.id===a.motocicletaId)})); ok(res,data);
+  // Solo alertas de desactivación (las de fallo GPS no tienen motivo y se listan en /api/alertas/pending)
+  const db=readDb(); const data=db.alertas.filter(a=>!a.atendida && a.motivo).map(a=>({...a,cliente:db.clientes.find(c=>c.id===a.clienteId),motocicleta:db.motocicletas.find(m=>m.id===a.motocicletaId)})); ok(res,data);
 });
 app.post('/api/alertas/:id/desactivar', authenticate, authorize('admin'), (req,res)=>{
   const result=updateDb(db=>{ const a=db.alertas.find(x=>x.id===req.params.id); if(!a) throw new Error('ALERT_NOT_FOUND'); const moto=db.motocicletas.find(m=>m.id===a.motocicletaId); if(!moto) throw new Error('MOTO_NOT_FOUND'); moto.estadoGPS='apagado'; a.atendida=true; a.atendidaEn=new Date().toISOString(); const command={id:id('gps'),motocicletaId:moto.id,accion:'apagar',solicitadoPor:req.user.id,timestamp:new Date().toISOString(),resultado:'exitoso'}; db.comandosGPS.push(command); return {alerta:a,motocicleta:moto,command}; }); ok(res,result,'Motocicleta desactivada');
@@ -615,18 +586,20 @@ const BUSINESS_ERRORS = {
   FEE_EXISTS: [409, 'Ya existe una cuota con ese número para este contrato'],
   CONTRACT_NOT_FOUND: [404, 'Contrato no encontrado'],
   INVALID_AMOUNT: [400, 'El monto debe ser un número mayor que cero'],
+  CLIENTE_NOT_FOUND: [404, 'Cliente no encontrado'],
+  MOTO_NOT_FOUND: [404, 'Motocicleta no encontrada'],
+  ALERT_NOT_FOUND: [404, 'Alerta no encontrada'],
 };
-app.use((err,_req,res,_next)=>{ console.error(err); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?'El comprobante no puede superar los 5 MB':'El archivo del comprobante no es válido'); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); fail(res,500,'Error interno del servidor'); });
+app.use((err,req,res,_next)=>{ const esDocumento=req.path==='/api/clientes'; if(err instanceof multer.MulterError||err.message==='INVALID_FILE_TYPE') discardUploads(req); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?(esDocumento?'Cada documento no puede superar los 5 MB':'El comprobante no puede superar los 5 MB'):(esDocumento?'Los documentos enviados no son válidos':'El archivo del comprobante no es válido')); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,esDocumento?'Los documentos deben ser archivos PDF, JPG o PNG':'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); console.error(err); fail(res,500,'Error interno del servidor'); });
 
-app.listen(PORT, async ()=>{ console.log(`MotoLeasing API escuchando en http://localhost:${PORT}`); try { if (readDb().usuarios.length === 0) await seed(); console.log('Jobs iniciales:', await runJobs()); } catch(e){ console.error('No se pudieron ejecutar jobs iniciales:',e.message); } });
-setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
 // ───────────────────────────── SCHEDULE CRON ───────────────────────────────────
 // Notificación automática de cobro según configuración guardada
 const cron = require('node-cron');
 let notificationTask = null;
 function scheduleNotificationCron() {
   const cfg = readDb().configuracion_notificacion?.[0] || { diaSemana: 0, hora: 0 };
-  const expr = `${cfg.hora} ${cfg.diaSemana} * * *`;
+  // Formato de node-cron: minuto hora díaDelMes mes díaDeLaSemana
+  const expr = `0 ${cfg.hora} * * ${cfg.diaSemana}`;
   if (notificationTask) notificationTask.stop();
   notificationTask = cron.schedule(expr, async () => {
     console.log('Ejecutando proceso automático de cobro (cron) – configurado');
@@ -634,5 +607,25 @@ function scheduleNotificationCron() {
     catch (err) { console.error('Error en proceso automático de cobro (cron):', err); }
   });
 }
-// inicializar al levantar el servidor
-scheduleNotificationCron();
+
+function startServer(port = PORT) {
+  const server = app.listen(port, async ()=>{
+    console.log(`MotoLeasing API escuchando en http://localhost:${server.address().port}`);
+    try {
+      if (readDb().usuarios.length === 0) await seed();
+      console.log('Jobs iniciales:', await runJobs());
+    } catch(e) {
+      console.error('No se pudieron ejecutar jobs iniciales:',e.message);
+    }
+  });
+  const timer = setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
+  timer.unref();
+  // inicializar al levantar el servidor
+  scheduleNotificationCron();
+  server.on('close', () => { clearInterval(timer); if (notificationTask) notificationTask.stop(); });
+  return server;
+}
+
+if (require.main === module) startServer();
+
+module.exports = { app, startServer };

@@ -4,25 +4,26 @@ import AdminLayout from '@/components/layout/AdminLayout';
 import { getAlerts, deactivateAlert } from '@/services/api/endpoints';
 import { useEffect, useState } from 'react';
 import { AlertTriangle, ZapOff, Loader2, CheckCircle2, Clock, Calendar } from 'lucide-react';
+import type { AlertaDesactivacion } from '@/types';
+import { getErrorMessage } from '@/services/api/client';
 
 function Countdown({ fecha }: { fecha: string }) {
-  const diff = new Date(fecha).getTime() - Date.now();
-  if (diff < 0) return <span className="text-red-400 font-bold text-xs">¡Ahora!</span>;
-  const h = Math.floor(diff / 3600000);
-  const d = Math.floor(h / 24);
-  if (d > 0) return <span className="text-yellow-400 font-semibold text-xs">En {d}d {h % 24}h</span>;
-  return <span className="text-red-400 font-bold text-xs animate-pulse">En {h}h</span>;
+  return (
+    <time dateTime={fecha} className="text-yellow-400 font-semibold text-xs">
+      {new Date(fecha).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+    </time>
+  );
 }
 
 export default function DesactivacionesPage() {
-  const [alertas, setAlertas] = useState<any[]>([]);
+  const [alertas, setAlertas] = useState<AlertaDesactivacion[]>([]);
   useEffect(() => { getAlerts().then(setAlertas).catch(e => alert(e.message)); }, []);
   const [loading, setLoading] = useState<string | null>(null);
   const [done,    setDone]    = useState<string[]>([]);
 
   const handleDesactivar = async (id: string) => {
     setLoading(id);
-    try { await deactivateAlert(id); } catch (e: any) { alert(e.response?.data?.error || e.message); setLoading(null); return; }
+    try { await deactivateAlert(id); } catch (error: unknown) { alert(getErrorMessage(error)); setLoading(null); return; }
     setLoading(null);
     setDone(p => [...p, id]);
     setAlertas(p => p.filter(a => a.id !== id));

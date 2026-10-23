@@ -5,7 +5,9 @@ import { getClient } from '@/services/api/endpoints';
 import { Zap, ZapOff, TrendingUp, TrendingDown, Minus, CheckCircle2, AlertTriangle, Clock, LogOut, Bike } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
-import type { ScoreCategoria } from '@/types';
+import type { ClienteConDetalle, ScoreCategoria } from '@/types';
+import { getErrorMessage } from '@/services/api/client';
+import ProximaCuotaCard from '@/components/fee/nextFeeCard';
 
 const formatCOP=(n:number)=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n);
 
@@ -24,15 +26,16 @@ const plataformaLabel: Record<string, string> = { rappi: 'Rappi', didi: 'DiDi', 
 export default function RiderMiEstadoPage() {
   const router = useRouter();
   const { user, logout } = useAuthStore();
-  const clienteId = (user as any)?.clienteId ?? user?.id;
-  const [data, setData] = useState<any>(null);
+  const clienteId = user?.clienteId ?? user?.id;
+  const [data, setData] = useState<ClienteConDetalle | null>(null);
   const [error, setError] = useState('');
-  useEffect(() => { if (clienteId) getClient(clienteId).then(setData).catch(e => setError(e.response?.data?.error || e.message)); }, [clienteId]);
+  useEffect(() => { if (clienteId) getClient(clienteId).then(setData).catch(error => setError(getErrorMessage(error))); }, [clienteId]);
   const cliente = data?.cliente, motocicleta = data?.motocicleta, contrato = data?.contrato, score = data?.score, historial = data?.historial || [];
 
   const handleLogout = () => { logout(); router.push('/login'); };
 
   if (!data) return <div className="min-h-screen bg-[#141414] flex items-center justify-center text-white">{error || 'Cargando…'}</div>;
+  if (!cliente || !motocicleta || !contrato) return <div className="min-h-screen bg-[#141414] flex items-center justify-center text-white">Información del contrato incompleta.</div>;
 
   const progreso = contrato.cuotasTotales ? Math.round((contrato.cuotasPagadas / contrato.cuotasTotales) * 100) : 0;
   const color    = score ? scoreColors[score.categoria as ScoreCategoria] : '#A0A0A0';
@@ -126,6 +129,9 @@ export default function RiderMiEstadoPage() {
             </div>
           </div>
         </div>
+
+        {/* Próxima cuota (HU-22) */}
+        <ProximaCuotaCard cuota={data.proximaCuota} />
 
         {/* Score */}
         <div className="rounded-2xl border bg-[#1F1F1F]/60 p-5 space-y-3" style={{ borderColor: `${color}30` }}>
