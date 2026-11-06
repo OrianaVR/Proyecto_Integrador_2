@@ -307,6 +307,38 @@ describe('HU-19 - Control manual de la motocicleta', () => {
   });
 });
 
+describe('HU-20 - Alerta de fallo en el control remoto', () => {
+  test('Happy Path: un comando manual fallido genera una sola alerta visible para el admin', async () => {
+    const db = readDb();
+    db.motocicletas[0].estadoGPS = 'sin_señal';
+    writeDb(db);
+    const { response, payload } = await api('/api/motocicletas/m1/gps/apagar', { method: 'POST' });
+    assert.equal(response.status, 409);
+    assert.match(payload.error, /señal GPS/i);
+    await api('/api/motocicletas/m1/gps/apagar', { method: 'POST' });
+    const { payload: fallos } = await api('/api/alertas/fallos');
+    assert.equal(fallos.data.length, 1);
+    assert.equal(fallos.data[0].tipo, 'apagado');
+    assert.equal(fallos.data[0].cliente.id, 'c1');
+  });
+
+  test('Flujo alternativo: el apagado automático sin señal alerta una vez y se puede resolver', async () => {
+    const db = readDb();
+    db.cuotas[0] = { ...db.cuotas[0], estado: 'vencido', fechaVencimiento: isoDate(-10), diasMorosidad: 10 };
+    db.motocicletas[0].estadoGPS = 'sin_señal';
+    writeDb(db);
+    await api('/api/jobs/run', { method: 'POST' });
+    await api('/api/jobs/run', { method: 'POST' });
+    const { payload: fallos } = await api('/api/alertas/fallos');
+    assert.equal(fallos.data.length, 1);
+    assert.equal(fallos.data[0].diasMora >= 7, true);
+    const { response } = await api(`/api/alertas/${fallos.data[0].id}/resolver`, { method: 'PATCH' });
+    assert.equal(response.status, 200);
+    const { payload: despues } = await api('/api/alertas/fallos');
+    assert.equal(despues.data.length, 0);
+  });
+});
+
 describe('Prueba básica de performance', () => {
   test('20 consultas de salud responden con p95 menor a 500 ms', async () => {
     const durations = [];
