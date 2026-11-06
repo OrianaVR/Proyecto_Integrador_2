@@ -1,5 +1,23 @@
-const { updateDb } = require('./db');
+const { readDb, updateDb } = require('./db');
 const { id } = require('./utils');
+
+// HU-04: canales de notificación disponibles
+const CANALES = ['whatsapp', 'sms', 'email'];
+const CANAL_LABEL = { whatsapp: 'WhatsApp', sms: 'SMS', email: 'correo electrónico' };
+
+/** Modo simulado (por defecto activo): sin proveedor configurado, el envío se registra como enviado. MESSAGING_SIMULATION=false lo desactiva. */
+const simulacionActiva = () => process.env.MESSAGING_SIMULATION !== 'false';
+
+/** Estado del proveedor de cada canal según las variables de entorno: 'configurado', 'simulado' o 'no_configurado' */
+function estadoProveedores() {
+  const n8n = Boolean(process.env.N8N_WEBHOOK_URL);
+  const real = {
+    whatsapp: Boolean(process.env.WHATSAPP_API_URL && process.env.WHATSAPP_API_TOKEN),
+    sms: Boolean(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_FROM),
+    email: Boolean((process.env.SENDGRID_API_KEY && process.env.EMAIL_FROM) || (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS)),
+  };
+  return Object.fromEntries(CANALES.map(c => [c, real[c] || n8n ? 'configurado' : simulacionActiva() ? 'simulado' : 'no_configurado']));
+}
 
 function formatCOP(num) {
   return new Intl.NumberFormat('es-CO', {
@@ -43,30 +61,53 @@ async function sendMessagingProvider({ canal = 'whatsapp', destinatario, mensaje
         }),
       });
       const data = await response.json();
-      return { sent: response.ok, status: response.status, provider: 'whatsapp_cloud_api', messageId: data.messages?.[0]?.id || `wa-${Date.now()}`, response: data };
+      return { sent: response.ok, status: response.status, provider: 'whatsapp_cloud_api', messageId: data.messages?.[0]?.id || `wa-${Date.now()}`, response: data, error: response.ok ? undefined : (data.error?.message || `WhatsApp respondió ${response.status}`) };
     } catch (error) {
       console.error('[WhatsApp API Error]:', error.message);
       return { sent: false, provider: 'whatsapp_cloud_api', error: error.message };
     }
   }
 
-  // 2. SMS via Twilio
+  // 2. SMS via Twilio (API REST, sin dependencias adicionales)
   if (canal === 'sms' && twilioSid && twilioToken && twilioFrom) {
     try {
-      const twilio = require('twilio')(twilioSid, twilioToken);
-      const sms = await twilio.messages.create({
-        body: mensaje,
-        from: twilioFrom,
-        to: destinatario,
+      const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${twilioSid}/Messages.json`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${twilioSid}:${twilioToken}`).toString('base64')}`,
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams({ To: destinatario, From: twilioFrom, Body: mensaje }),
       });
-      return { sent: true, status: 200, provider: 'twilio_sms', messageId: sms.sid };
+      const data = await response.json();
+      return { sent: response.ok, status: response.status, provider: 'twilio_sms', messageId: data.sid || null, error: response.ok ? undefined : (data.message || `Twilio respondió ${response.status}`) };
     } catch (error) {
       console.error('[Twilio SMS Error]:', error.message);
       return { sent: false, provider: 'twilio_sms', error: error.message };
     }
   }
 
-  // 3. Email via nodemailer
+  // 3a. Email via SendGrid (API REST, sin dependencias adicionales)
+  if (canal === 'email' && process.env.SENDGRID_API_KEY && process.env.EMAIL_FROM) {
+    try {
+      const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.SENDGRID_API_KEY}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: destinatario }] }],
+          from: { email: process.env.EMAIL_FROM },
+          subject: metadata?.subject || 'Notificación MotoLeasing',
+          content: [{ type: 'text/plain', value: mensaje }],
+        }),
+      });
+      return { sent: response.ok, status: response.status, provider: 'sendgrid_email', messageId: response.headers.get('x-message-id') || null, error: response.ok ? undefined : `SendGrid respondió ${response.status}` };
+    } catch (error) {
+      console.error('[SendGrid Error]:', error.message);
+      return { sent: false, provider: 'sendgrid_email', error: error.message };
+    }
+  }
+
+  // 3b. Email via nodemailer (SMTP)
   if (canal === 'email' && smtpHost && smtpUser && smtpPass) {
     try {
       const nodemailer = require('nodemailer');
@@ -98,14 +139,17 @@ async function sendMessagingProvider({ canal = 'whatsapp', destinatario, mensaje
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ canal, destinatario, mensaje, metadata, timestamp: new Date().toISOString() }),
       });
-      return { sent: response.ok, status: response.status, provider: 'n8n_webhook', messageId: `n8n-${Date.now()}` };
+      return { sent: response.ok, status: response.status, provider: 'n8n_webhook', messageId: `n8n-${Date.now()}`, error: response.ok ? undefined : `n8n respondió ${response.status}` };
     } catch (error) {
       console.error('[n8n Webhook Error]:', error.message);
       return { sent: false, provider: 'n8n_webhook', error: error.message };
     }
   }
 
-  // 5. Simulated / default provider
+  // 5. Sin proveedor configurado: falla, salvo que el modo simulado esté activo (demo y entorno local)
+  if (!simulacionActiva()) {
+    return { sent: false, provider: 'ninguno', error: `El canal ${CANAL_LABEL[canal] || canal} no tiene un proveedor configurado` };
+  }
   const simulatedId = `msg-${canal}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   console.log(`[Mensajería ${canal.toUpperCase()} Enviada a ${destinatario}]:`);
   console.log(`"${mensaje}"`);
@@ -124,9 +168,11 @@ async function enviarRecordatorioCobro({ cliente, contrato, cuota, motocicleta }
   const montoMultas = formatCOP(multas);
   const montoExcedentes = formatCOP(excedentes);
   const totalMonto = formatCOP(base + multas + excedentes);
-  const canalPreferido = cliente.canalPreferido || (process.env.MESSAGING_CHANNEL || 'whatsapp');
-  const telefono = cliente.telefono || 'Sin número';
-  const email = cliente.email;
+  // HU-04: canal del perfil del cliente; si no tiene, el canal por defecto de la configuración general
+  const config = readDb().configuracion_notificacion?.[0] || {};
+  const canal = CANALES.includes(cliente.canalPreferido) ? cliente.canalPreferido : (CANALES.includes(config.canalPorDefecto) ? config.canalPorDefecto : (process.env.MESSAGING_CHANNEL || 'whatsapp'));
+  const habilitados = Array.isArray(config.canalesHabilitados) ? config.canalesHabilitados : CANALES;
+  const destinatario = canal === 'email' ? cliente.email : cliente.telefono;
 
   const mensaje = [
     `🏍️ *Recordatorio de Cobro - MotoLeasing*`,
@@ -141,21 +187,17 @@ async function enviarRecordatorioCobro({ cliente, contrato, cuota, motocicleta }
     `Recuerda realizar tu pago oportunamente a través de Nequi, Daviplata o Transferencia para mantener tu servicio GPS activo y cuidar tu score crediticio.`,
   ].join('\n');
 
-  // Determinar orden de canales (preferido primero, luego los demás)
-  const allChannels = ['whatsapp', 'sms', 'email'];
-  const channelsToTry = [canalPreferido, ...allChannels.filter(c => c !== canalPreferido)];
-
-  let providerResult = null;
-  let intentos = 0;
-  let ultimoError = undefined;
-  for (const canal of channelsToTry) {
-    intentos++;
-    const destinatario = canal === 'email' ? email : telefono;
-    providerResult = await sendMessagingProvider({ canal, destinatario, mensaje, metadata: { clienteId: cliente.id, contratoId: contrato?.id, cuotaId: cuota.id, monto: cuota.monto, numeroCuota: cuota.numeroCuota } });
-    if (providerResult.sent) break; // éxito, salir del bucle
-    ultimoError = providerResult.error || 'Error desconocido';
-    console.warn(`Intento ${intentos} falló vía ${canal}: ${ultimoError}`);
+  // El mensaje se envía exclusivamente por el canal asignado (sin pasar a otro canal si falla)
+  let providerResult;
+  if (!habilitados.includes(canal)) {
+    providerResult = { sent: false, provider: 'ninguno', error: `El canal ${CANAL_LABEL[canal]} está deshabilitado en la configuración general` };
+  } else if (!destinatario) {
+    providerResult = { sent: false, provider: 'ninguno', error: `El cliente no tiene ${canal === 'email' ? 'correo electrónico' : 'teléfono'} registrado` };
+  } else {
+    providerResult = await sendMessagingProvider({ canal, destinatario, mensaje, metadata: { clienteId: cliente.id, contratoId: contrato?.id, cuotaId: cuota.id, monto: cuota.monto, numeroCuota: cuota.numeroCuota, subject: `Recordatorio de cuota #${cuota.numeroCuota}` } });
   }
+  const ultimoError = providerResult.sent ? undefined : (providerResult.error || 'Error desconocido');
+  if (ultimoError) console.warn(`Falló el envío por ${canal}: ${ultimoError}`);
 
   // Registrar en historial
   const notificacion = {
@@ -164,22 +206,28 @@ async function enviarRecordatorioCobro({ cliente, contrato, cuota, motocicleta }
     contratoId: contrato?.id || null,
     cuotaId: cuota.id,
     tipo: 'cobro',
-    canal: providerResult?.provider?.replace('_service', '') || canalPreferido,
-    destinatario: providerResult?.provider === 'nodemailer_email' ? email : telefono,
+    canal,
+    destinatario: destinatario || null,
     titulo: `Recordatorio de cuota #${cuota.numeroCuota}`,
     mensaje,
     monto: Number(cuota.monto),
-    estado: providerResult?.sent ? 'enviado' : 'fallido',
-    proveedor: providerResult?.provider || canalPreferido,
-    messageId: providerResult?.messageId || null,
+    estado: providerResult.sent ? 'enviado' : 'fallido',
+    proveedor: providerResult.provider || canal,
+    messageId: providerResult.messageId || null,
     fecha: new Date().toISOString(),
-    error: providerResult?.sent ? undefined : ultimoError,
-    intentos,
+    error: ultimoError,
+    intentos: 1,
   };
 
   updateDb(db => {
     if (!db.notificaciones) db.notificaciones = [];
     db.notificaciones.push(notificacion);
+    // HU-04: si el canal falla, se registra el evento en los logs y se notifica al administrador
+    if (ultimoError) {
+      if (!db.logs) db.logs = [];
+      db.logs.push({ id: id('log'), nivel: 'ERROR', mensaje: `No se pudo enviar el recordatorio de la cuota #${cuota.numeroCuota} a ${cliente.nombre} ${cliente.apellido} por ${CANAL_LABEL[canal]}: ${ultimoError}`, timestamp: notificacion.fecha });
+      db.notificaciones.push({ id: id('not'), clienteId: null, destinatario: 'admin', tipo: 'fallo_envio', titulo: 'Falló el envío de una notificación de cobro', mensaje: `${cliente.nombre} ${cliente.apellido} · cuota #${cuota.numeroCuota} · ${CANAL_LABEL[canal]}: ${ultimoError}`, notificacionId: notificacion.id, canal: 'sistema', estado: 'pendiente', fecha: notificacion.fecha });
+    }
   });
 
   return notificacion;
@@ -216,6 +264,9 @@ async function createNotification({ clienteId, tipo, titulo, mensaje, contratoId
 }
 
 module.exports = {
+  CANALES,
+  CANAL_LABEL,
+  estadoProveedores,
   formatCOP,
   sendMessagingProvider,
   enviarRecordatorioCobro,

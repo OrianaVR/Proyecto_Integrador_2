@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
   LayoutDashboard, Users, Bike, AlertTriangle, UserPlus,
-  LogOut, Menu, Zap, ChevronRight, BarChart3, ShieldCheck, WifiOff,
+  LogOut, Menu, Zap, ChevronRight, BarChart3, ShieldCheck, WifiOff, Settings,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { cn } from '@/lib/utils';
@@ -19,6 +19,7 @@ const NAV_ITEMS = [
   { href: '/admin/pagos',           label: 'Verificación de Pagos', icon: ShieldCheck },
   { href: '/admin/desactivaciones', label: 'Desactivaciones',      icon: AlertTriangle },
   { href: '/admin/alertas-gps',     label: 'Alertas GPS',          icon: WifiOff },
+  { href: '/admin/configuracion',   label: 'Configuración',        icon: Settings },
 ];
 
 function Sidebar({

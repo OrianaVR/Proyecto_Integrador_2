@@ -69,7 +69,7 @@ export default function NuevoClientePage() {
   const [saving, setSaving] = useState(false);
   const [done, setDone]   = useState(false);
 
-  const [cliente, setCliente] = useState({ nombre: '', apellido: '', email: '', telefono: '', documentoId: '', ciudad: '', plataforma: 'rappi' });
+  const [cliente, setCliente] = useState({ nombre: '', apellido: '', email: '', telefono: '', documentoId: '', ciudad: '', plataforma: 'rappi', canalPreferido: '' });
   const [moto, setMoto]       = useState({ marca: '', modelo: '', año: '', placa: '', numeroSerie: '', color: '', montoSemanal: '', cuotasTotales: '18', fechaInicio: '', fechaFin: '' });
 
   const setC = (k: string, v: string) => setCliente(p => ({ ...p, [k]: v }));
@@ -150,6 +150,15 @@ export default function NuevoClientePage() {
                     <option value="didi">DiDi</option>
                     <option value="uber_eats">Uber Eats</option>
                     <option value="otra">Otra</option>
+                  </select>
+                </Field>
+                {/* HU-04: canal por el que se le envían los cobros */}
+                <Field label="Canal de notificación" id="canal">
+                  <select id="canal" value={cliente.canalPreferido} onChange={e => setC('canalPreferido', e.target.value)} className={selectCls}>
+                    <option value="">Según configuración general</option>
+                    <option value="whatsapp">WhatsApp</option>
+                    <option value="sms">SMS</option>
+                    <option value="email">Correo electrónico</option>
                   </select>
                 </Field>
               </div>

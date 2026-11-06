@@ -314,6 +314,51 @@ describe('HU-01 - Notificación automática de cobro', () => {
   });
 });
 
+describe('HU-04 - Seleccionar canal de notificación', () => {
+  test('CP-HU04-01: envía el cobro exclusivamente por el canal preferido del cliente', async () => {
+    const db = readDb();
+    db.cuotas[0].fechaVencimiento = isoDate(0);
+    db.clientes[0].canalPreferido = 'sms';
+    writeDb(db);
+    const { payload } = await api('/api/jobs/run', { method: 'POST' });
+    assert.equal(payload.data.notifications, 1);
+    const cobros = readDb().notificaciones.filter(n => n.tipo === 'cobro');
+    assert.equal(cobros.length, 1);
+    assert.equal(cobros[0].canal, 'sms');
+    assert.equal(cobros[0].destinatario, '3000000000');
+    assert.equal(cobros[0].estado, 'enviado');
+    assert.equal(cobros[0].intentos, 1);
+  });
+
+  test('CP-HU04-02: si el canal no está disponible, registra el error en logs y avisa al administrador', async () => {
+    const db = readDb();
+    db.cuotas[0].fechaVencimiento = isoDate(0);
+    db.clientes[0].canalPreferido = 'email';
+    db.configuracion_notificacion = [{ id: 'conf-1', canalPorDefecto: 'whatsapp', canalesHabilitados: ['whatsapp', 'sms'] }];
+    writeDb(db);
+    await api('/api/jobs/run', { method: 'POST' });
+    const despues = readDb();
+    const cobro = despues.notificaciones.find(n => n.tipo === 'cobro');
+    assert.equal(cobro.estado, 'fallido');
+    assert.equal(cobro.canal, 'email');
+    assert.match(cobro.error, /deshabilitado/);
+    assert.ok(despues.logs.some(l => l.nivel === 'ERROR' && /correo electrónico/.test(l.mensaje)));
+    assert.ok(despues.notificaciones.some(n => n.tipo === 'fallo_envio' && n.notificacionId === cobro.id));
+    const { payload } = await api('/api/configuracion/notificaciones');
+    assert.equal(payload.data.fallidos.length, 1);
+  });
+
+  test('Flujo alternativo: el admin cambia el canal y se rechaza un canal inválido', async () => {
+    const ok = await api('/api/clientes/c1/canal', { method: 'PATCH', body: { canal: 'email' } });
+    assert.equal(ok.response.status, 200);
+    assert.equal(readDb().clientes[0].canalPreferido, 'email');
+    const malo = await api('/api/clientes/c1/canal', { method: 'PATCH', body: { canal: 'telegram' } });
+    assert.equal(malo.response.status, 400);
+    const config = await api('/api/configuracion/notificaciones', { method: 'PUT', body: { canalPorDefecto: 'sms', canalesHabilitados: ['whatsapp'] } });
+    assert.equal(config.response.status, 400);
+  });
+});
+
 describe('HU-17 - Apagado automático por mora', () => {
   test('Happy Path: apaga una moto con siete o más días de mora', async () => {
     const db = readDb();

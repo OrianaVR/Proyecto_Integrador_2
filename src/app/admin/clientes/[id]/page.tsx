@@ -11,6 +11,7 @@ import type { ClienteConDetalle } from '@/types';
 import { getErrorMessage } from '@/services/api/client';
 import CuotasPagosPanel from '@/components/fee/feePaymentPage';
 import MultasCargosPanel from '@/components/fee/finesChargesPanel';
+import CanalNotificacionSelect from '@/components/notifications/notificationChannelSelect';
 
 const formatCOP=(n:number)=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n);
 const scoreColors: Record<ScoreCategoria, string> = { excelente: '#22c55e', bueno: '#3b82f6', regular: '#eab308', malo: '#ef4444' };
@@ -135,6 +136,7 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
               </div>
               <p className="text-sm text-[#666666]">{cliente.email} · {cliente.telefono}</p>
               <p className="text-xs text-[#555555] mt-0.5">CC {cliente.documentoId} · {cliente.ciudad}</p>
+              <CanalNotificacionSelect key={cliente.id} clienteId={cliente.id} canal={cliente.canalPreferido} />
             </div>
             {/* GPS Control */}
             <button onClick={toggleGPS} disabled={gpsLoading}
