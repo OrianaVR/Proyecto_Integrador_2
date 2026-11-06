@@ -62,6 +62,13 @@ export interface Pago {
   monto: number; metodoPago: 'efectivo' | 'transferencia' | 'tarjeta' | 'nequi' | 'daviplata';
   referencia?: string; comprobante?: string; registradoPor: string;
   fechaPago: string; notas?: string;
+  estado?: EstadoVerificacionPago; razonRechazo?: string;
+}
+
+export type EstadoVerificacionPago = 'PENDIENTE' | 'APROBADO' | 'RECHAZADO';
+
+export interface PagoPendiente extends Pago {
+  cliente: Cliente | null; motocicleta: Motocicleta | null; cuota: Cuota | null;
 }
 
 export interface ScoreCredito {

@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, ReporteFinanciero, Notificacion } from '@/types';
+import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, PagoPendiente, ReporteFinanciero, Notificacion } from '@/types';
 
 export async function login(email: string, password: string) {
   const { data } = await apiClient.post<ApiResponse<{ token: string; user: UsuarioAutenticado }>>('/auth/login', { email, password });
@@ -92,5 +92,24 @@ export async function createPago(form: FormData) {
 export async function getPagosByCliente(clienteId: string) {
   const { data } = await apiClient.get<ApiResponse<Pago[]>>(`/pagos/cliente/${clienteId}`);
   if (!data.success || !data.data) throw new Error(data.error || 'Error cargando pagos');
+  return data.data;
+}
+
+// ─── Verificación de pagos (HU-15) ───────────────────────────────────────────
+export async function getPagosPendientes() {
+  const { data } = await apiClient.get<ApiResponse<PagoPendiente[]>>('/pagos/pendientes');
+  if (!data.success || !data.data) throw new Error(data.error || 'Error cargando pagos pendientes');
+  return data.data;
+}
+/** Al aprobar, el backend enciende la moto si estaba apagada (HU-18). */
+export async function aprobarPago(id: string) {
+  const { data } = await apiClient.patch<ApiResponse<Pago>>(`/pagos/${id}/aprobar`);
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo aprobar el pago');
+  return data.data;
+}
+/** Al rechazar, el backend revierte el saldo, la cuota y el score. */
+export async function rechazarPago(id: string, razon: string) {
+  const { data } = await apiClient.patch<ApiResponse<Pago>>(`/pagos/${id}/rechazar`, { razon });
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo rechazar el pago');
   return data.data;
 }
