@@ -99,6 +99,14 @@ export interface AlertaDesactivacion {
   urgencia: 'alta' | 'media' | 'baja'; atendida: boolean;
 }
 
+/** HU-20: alerta de fallo del control remoto (no se pudo encender o apagar la moto) */
+export interface AlertaFalloGPS {
+  id: string; clienteId: string | null; motocicletaId: string;
+  tipo: 'encendido' | 'apagado'; error: string; diasMora?: number;
+  creadoEn: string; atendida: boolean;
+  cliente: Cliente | null; motocicleta: Motocicleta | null;
+}
+
 export interface StatsResumen {
   motosActivas: number; motosBloqueadas: number;
   clientesEnMora: number; recaudoMes: number; recaudoMesAnterior: number;

@@ -112,7 +112,14 @@ function autoShutdownMotos() {
       const maxMora = cuotasMora.reduce((max, c) => Math.max(max, c.diasMorosidad || 0), 0);
       if (maxMora < threshold) continue;
       const moto = db.motocicletas.find(m => m.id === contrato.motocicletaId);
-      if (!moto || moto.estadoGPS === 'apagado' || moto.estadoGPS === 'sin_señal') continue;
+      if (!moto || moto.estadoGPS === 'apagado') continue;
+      if (moto.estadoGPS === 'sin_señal') {
+        // HU-20: la moto debería apagarse por mora pero no tiene señal: se alerta al admin (una sola alerta abierta por moto)
+        if (!db.alertas.some(a => a.motocicletaId === moto.id && a.tipo === 'apagado' && !a.atendida)) {
+          db.alertas.push({ id: id('alerta'), clienteId: contrato.clienteId, motoId: moto.id, motocicletaId: moto.id, tipo: 'apagado', error: 'GPS_NO_SIGNAL', diasMora: maxMora, creadoEn: now, atendida: false, atendidaEn: null });
+        }
+        continue;
+      }
       moto.estadoGPS = 'apagado';
       moto.disponible = false;
       const command = { id: `gps-${Date.now()}-${moto.id}`, motocicletaId: moto.id, accion: 'apagar', solicitadoPor: 'system-auto', timestamp: now, resultado: 'exitoso' };

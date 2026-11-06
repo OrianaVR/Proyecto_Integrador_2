@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
   LayoutDashboard, Users, Bike, AlertTriangle, UserPlus,
-  LogOut, Menu, Zap, ChevronRight, BarChart3, ShieldCheck,
+  LogOut, Menu, Zap, ChevronRight, BarChart3, ShieldCheck, WifiOff,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { cn } from '@/lib/utils';
@@ -18,6 +18,7 @@ const NAV_ITEMS = [
   { href: '/admin/motocicletas',    label: 'Motocicletas',         icon: Bike },
   { href: '/admin/pagos',           label: 'Verificación de Pagos', icon: ShieldCheck },
   { href: '/admin/desactivaciones', label: 'Desactivaciones',      icon: AlertTriangle },
+  { href: '/admin/alertas-gps',     label: 'Alertas GPS',          icon: WifiOff },
 ];
 
 function Sidebar({

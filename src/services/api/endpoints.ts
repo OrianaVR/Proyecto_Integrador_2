@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, PagoPendiente, ReporteFinanciero, Notificacion } from '@/types';
+import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, PagoPendiente, ReporteFinanciero, Notificacion, AlertaFalloGPS } from '@/types';
 
 export async function login(email: string, password: string) {
   const { data } = await apiClient.post<ApiResponse<{ token: string; user: UsuarioAutenticado }>>('/auth/login', { email, password });
@@ -111,5 +111,17 @@ export async function aprobarPago(id: string) {
 export async function rechazarPago(id: string, razon: string) {
   const { data } = await apiClient.patch<ApiResponse<Pago>>(`/pagos/${id}/rechazar`, { razon });
   if (!data.success || !data.data) throw new Error(data.error || 'No se pudo rechazar el pago');
+  return data.data;
+}
+
+// ─── Alertas de fallo del control remoto (HU-20) ─────────────────────────────
+export async function getFallosGps() {
+  const { data } = await apiClient.get<ApiResponse<AlertaFalloGPS[]>>('/alertas/fallos');
+  if (!data.success || !data.data) throw new Error(data.error || 'Error cargando alertas de fallo');
+  return data.data;
+}
+export async function resolverAlerta(id: string) {
+  const { data } = await apiClient.patch<ApiResponse<AlertaFalloGPS>>(`/alertas/${id}/resolver`);
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo resolver la alerta');
   return data.data;
 }

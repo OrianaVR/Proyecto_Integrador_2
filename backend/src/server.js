@@ -430,6 +430,9 @@ async function encenderMoto(motoId, attempt = 0){
 // Helper: crear alerta de fallo crítico en encendido/apagado
 async function crearAlertaFallo({ clienteId, motoId, tipo, error }) {
   const db = readDb();
+  // HU-20: una sola alerta abierta por moto y tipo de fallo (no se duplica en cada reintento)
+  const abierta = (db.alertas || []).find(a => a.motocicletaId === motoId && a.tipo === tipo && !a.atendida);
+  if (abierta) return abierta;
   const alerta = {
     id: id('alerta'),
     clienteId,
@@ -477,8 +480,18 @@ app.post('/api/webhooks/pago-aprobado', async (req, res) => {
     fail(res, 500, 'Error procesando encendido');
   }
 });
-app.post('/api/motocicletas/:id/gps/encender', authenticate, authorize('admin'), (req,res)=>setGps(req,res,'encendido').catch(e=>fail(res,e.message==='MOTO_NOT_FOUND'?404:409,e.message==='GPS_NO_SIGNAL'?'La motocicleta no tiene señal GPS':e.message)));
-app.post('/api/motocicletas/:id/gps/apagar', authenticate, authorize('admin'), (req,res)=>setGps(req,res,'apagado').catch(e=>fail(res,e.message==='MOTO_NOT_FOUND'?404:409,e.message)));
+// HU-20: si el comando manual falla por falta de señal, se registra una alerta de fallo para el admin
+async function falloControlGps(req,res,accion,e){
+  if(e.message==='MOTO_NOT_FOUND') return fail(res,404,'Motocicleta no encontrada');
+  if(e.message==='GPS_NO_SIGNAL'){
+    const moto=readDb().motocicletas.find(m=>m.id===req.params.id);
+    await crearAlertaFallo({ clienteId: moto?.clienteId || null, motoId: req.params.id, tipo: accion, error: 'GPS_NO_SIGNAL' });
+    return fail(res,409,'La motocicleta no tiene señal GPS. Se registró una alerta de fallo.');
+  }
+  return fail(res,409,e.message);
+}
+app.post('/api/motocicletas/:id/gps/encender', authenticate, authorize('admin'), (req,res)=>setGps(req,res,'encendido').catch(e=>falloControlGps(req,res,'encendido',e)));
+app.post('/api/motocicletas/:id/gps/apagar', authenticate, authorize('admin'), (req,res)=>setGps(req,res,'apagado').catch(e=>falloControlGps(req,res,'apagado',e)));
 
 // ───────────────────────────── ALERTAS ADMINISTRATIVAS ──────────────────────────────
 // Listar alertas pendientes (solo admin)
@@ -486,6 +499,16 @@ app.get('/api/alertas/pending', authenticate, authorize('admin'), (req, res) => 
   const db = readDb();
   const pending = (db.alertas || []).filter(a => !a.atendida);
   ok(res, pending);
+});
+
+// HU-20: fallos del control remoto (las alertas de fallo tienen `tipo`; las de desactivación tienen `motivo`), la más reciente primero
+app.get('/api/alertas/fallos', authenticate, authorize('admin'), (req, res) => {
+  const db = readDb();
+  const fallos = (db.alertas || [])
+    .filter(a => a.tipo && !a.atendida)
+    .sort((a, b) => String(b.creadoEn).localeCompare(String(a.creadoEn)))
+    .map(a => ({ ...a, cliente: db.clientes.find(c => c.id === a.clienteId) || null, motocicleta: db.motocicletas.find(m => m.id === a.motocicletaId) || null }));
+  ok(res, fallos);
 });
 
 // Marcar alerta como atendida
