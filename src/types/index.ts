@@ -19,7 +19,16 @@ export interface Cliente {
   telefono: string; documentoId: string; plataforma: PlataformaGig;
   fechaRegistro: string; rol: RolUsuario; activo: boolean;
   fotoPerfil?: string; ciudad?: string;
-  canalPreferido?: NotificationChannel; // nuevo campo
+  canalPreferido?: NotificationChannel | null; // HU-04: null = usa el canal por defecto de la configuración general
+}
+
+/** HU-04: configuración general de notificaciones */
+export interface ConfiguracionNotificaciones {
+  canalPorDefecto: NotificationChannel;
+  canalesHabilitados: NotificationChannel[];
+  diaSemana?: number; hora?: number;
+  proveedores: Record<NotificationChannel, 'configurado' | 'simulado' | 'no_configurado'>;
+  fallidos: { id: string; fecha: string; canal: NotificationChannel; error?: string; titulo: string; cliente: Cliente | null }[];
 }
 
 export interface DocumentoVehiculo {

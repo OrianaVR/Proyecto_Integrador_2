@@ -8,7 +8,7 @@ const fs = require('fs');
 const { readDb, updateDb, ensureDb } = require('./db');
 const { signToken, authenticate, authorize } = require('./auth');
 const { id, calculateScore } = require('./utils');
-const { createNotification } = require('./notifications');
+const { createNotification, CANALES, estadoProveedores } = require('./notifications');
 const { runJobs, processAutomaticCollection } = require('./jobs');
 const { seed } = require('./seed');
 const { generarReporteFinanciero, exportarReportePDF, exportarReporteExcel } = require('./reports');
@@ -100,6 +100,15 @@ app.get('/api/clientes/:id', authenticate, (req,res)=>{
   const detalle=clienteDetalle(readDb(),req.params.id); if(!detalle) return fail(res,404,'Cliente no encontrado'); ok(res,detalle);
 });
 
+// HU-04: canal de notificación preferido del cliente (null = usa el canal por defecto de la configuración general)
+app.patch('/api/clientes/:id/canal', authenticate, authorize('admin'), (req,res)=>{
+  const canal=req.body.canal ?? null;
+  if(canal!==null && !CANALES.includes(canal)) return fail(res,400,'El canal debe ser whatsapp, sms o email');
+  const db=readDb(); if(!db.clientes.some(c=>c.id===req.params.id)) return fail(res,404,'Cliente no encontrado');
+  const cliente=updateDb(db=>{ const c=db.clientes.find(x=>x.id===req.params.id); c.canalPreferido=canal; return c; });
+  ok(res,cliente,'Canal de notificación actualizado');
+});
+
 const DOCUMENT_KEYS = ['cedula', 'contrato_firmado', 'soat', 'tecnomecanica', 'tarjeta_propiedad', 'licencia'];
 
 function discardUploads(req) {
@@ -117,7 +126,7 @@ app.post('/api/clientes', authenticate, authorize('admin'), upload.fields(DOCUME
     if(db.motocicletas.some(m=>m.placa===String(body.placa).toUpperCase())) throw new Error('PLATE_EXISTS');
     if(body.dispositivoGPS && db.motocicletas.some(m=>m.dispositivoGPS===String(body.dispositivoGPS))) throw new Error('GPS_EXISTS');
     const clienteId=id('c'), motoId=id('m'), contratoId=id('ct');
-    const cliente={id:clienteId,nombre:body.nombre,apellido:body.apellido,email:body.email,telefono:body.telefono,documentoId:String(body.documentoId),plataforma:body.plataforma,fechaRegistro:new Date().toISOString().slice(0,10),rol:'rider',activo:true,ciudad:body.ciudad};
+    const cliente={id:clienteId,nombre:body.nombre,apellido:body.apellido,email:body.email,telefono:body.telefono,documentoId:String(body.documentoId),plataforma:body.plataforma,fechaRegistro:new Date().toISOString().slice(0,10),rol:'rider',activo:true,ciudad:body.ciudad,canalPreferido:CANALES.includes(body.canalPreferido)?body.canalPreferido:null};
     const moto={id:motoId,marca:body.marca,modelo:body.modelo,año:Number(body.año),placa:String(body.placa).toUpperCase(),numeroSerie:body.numeroSerie,color:body.color,estadoGPS:'apagado',dispositivoGPS:body.dispositivoGPS||null,disponible:true,clienteId:clienteId,creadoEn:new Date().toISOString(),vencimientoSOAT:body.vencimientoSOAT||null,vencimientoTecno:body.vencimientoTecno||null,documentos:[]};
     for (const [tipo, [file]] of Object.entries(req.files || {})) moto.documentos.push({id:id('doc'),motocicletaId:motoId,tipo,nombre:file.originalname,url:`/uploads/${file.filename}`,fechaSubida:new Date().toISOString(),subidoPor:req.user.id});
     const monto=Number(body.montoSemanal), cuotas=Number(body.cuotasTotales), total=monto*cuotas;
@@ -559,6 +568,40 @@ app.post('/api/jobs/cobro-automatico', authenticate, authorize('admin'), async (
   }
 });
 app.post('/api/jobs/run', authenticate, authorize('admin'), async (_req,res)=>ok(res,await runJobs(),'Procesos automáticos ejecutados'));
+
+// ───────────────────────────── CONFIGURACIÓN GENERAL DE NOTIFICACIONES (HU-04) ─────────────────
+function configNotificaciones(db) {
+  const cfg = db.configuracion_notificacion?.[0] || {};
+  return {
+    ...cfg,
+    canalPorDefecto: CANALES.includes(cfg.canalPorDefecto) ? cfg.canalPorDefecto : 'whatsapp',
+    canalesHabilitados: Array.isArray(cfg.canalesHabilitados) ? cfg.canalesHabilitados : [...CANALES],
+  };
+}
+
+app.get('/api/configuracion/notificaciones', authenticate, authorize('admin'), (_req, res) => {
+  const db = readDb();
+  // Últimos envíos de cobro fallidos, para que el administrador los revise
+  const fallidos = (db.notificaciones || [])
+    .filter(n => n.tipo === 'cobro' && n.estado === 'fallido')
+    .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))
+    .slice(0, 20)
+    .map(n => ({ ...n, cliente: db.clientes.find(c => c.id === n.clienteId) || null }));
+  ok(res, { ...configNotificaciones(db), proveedores: estadoProveedores(), fallidos });
+});
+
+app.put('/api/configuracion/notificaciones', authenticate, authorize('admin'), (req, res) => {
+  const { canalPorDefecto, canalesHabilitados } = req.body;
+  if (!CANALES.includes(canalPorDefecto)) return fail(res, 400, 'El canal por defecto debe ser whatsapp, sms o email');
+  if (!Array.isArray(canalesHabilitados) || canalesHabilitados.length === 0 || !canalesHabilitados.every(c => CANALES.includes(c))) return fail(res, 400, 'Selecciona al menos un canal habilitado válido');
+  if (!canalesHabilitados.includes(canalPorDefecto)) return fail(res, 400, 'El canal por defecto debe estar habilitado');
+  const config = updateDb(db => {
+    if (!Array.isArray(db.configuracion_notificacion) || !db.configuracion_notificacion.length) db.configuracion_notificacion = [{ id: 'conf-1', diaSemana: 0, hora: 0 }];
+    Object.assign(db.configuracion_notificacion[0], { canalPorDefecto, canalesHabilitados: [...new Set(canalesHabilitados)] });
+    return configNotificaciones(db);
+  });
+  ok(res, { ...config, proveedores: estadoProveedores() }, 'Configuración de notificaciones guardada');
+});
 
 // ───────────────────────────── REPORTES FINANCIEROS ─────────────────────────
 app.get('/api/reportes/financiero', authenticate, authorize('admin'), (req, res) => {

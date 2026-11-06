@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, PagoPendiente, ReporteFinanciero, Notificacion, AlertaFalloGPS, Multa, CargoAdicional } from '@/types';
+import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, PagoPendiente, ReporteFinanciero, Notificacion, AlertaFalloGPS, Multa, CargoAdicional, NotificationChannel, ConfiguracionNotificaciones } from '@/types';
 
 export async function login(email: string, password: string) {
   const { data } = await apiClient.post<ApiResponse<{ token: string; user: UsuarioAutenticado }>>('/auth/login', { email, password });
@@ -155,5 +155,23 @@ export async function createCargo(payload: { clienteId: string; contratoId: stri
 export async function pagarCargo(id: string) {
   const { data } = await apiClient.patch<ApiResponse<CargoAdicional>>(`/cargos-adicionales/${id}/pagar`);
   if (!data.success || !data.data) throw new Error(data.error || 'No se pudo marcar el cargo como pagado');
+  return data.data;
+}
+
+// ─── Canal de notificación (HU-04) ───────────────────────────────────────────
+/** `null` = el cliente usa el canal por defecto de la configuración general */
+export async function updateCanalCliente(clienteId: string, canal: NotificationChannel | null) {
+  const { data } = await apiClient.patch<ApiResponse<Cliente>>(`/clientes/${clienteId}/canal`, { canal });
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo actualizar el canal');
+  return data.data;
+}
+export async function getConfigNotificaciones() {
+  const { data } = await apiClient.get<ApiResponse<ConfiguracionNotificaciones>>('/configuracion/notificaciones');
+  if (!data.success || !data.data) throw new Error(data.error || 'Error cargando la configuración');
+  return data.data;
+}
+export async function saveConfigNotificaciones(payload: { canalPorDefecto: NotificationChannel; canalesHabilitados: NotificationChannel[] }) {
+  const { data } = await apiClient.put<ApiResponse<ConfiguracionNotificaciones>>('/configuracion/notificaciones', payload);
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo guardar la configuración');
   return data.data;
 }
