@@ -99,6 +99,18 @@ export interface AlertaDesactivacion {
   urgencia: 'alta' | 'media' | 'baja'; atendida: boolean;
 }
 
+/** HU-10: multa de tránsito; se suma al saldo del contrato al registrarla */
+export interface Multa {
+  id: string; clienteId: string; contratoId: string | null; monto: number;
+  descripcion: string | null; fecha: string; pagada: boolean; creadoEn: string;
+}
+
+/** HU-11: excedente o cargo adicional; se suma al saldo del contrato al registrarlo */
+export interface CargoAdicional {
+  id: string; clienteId: string; contratoId: string | null; concepto: string;
+  monto: number; pagada: boolean; creadoEn: string;
+}
+
 /** HU-20: alerta de fallo del control remoto (no se pudo encender o apagar la moto) */
 export interface AlertaFalloGPS {
   id: string; clienteId: string | null; motocicletaId: string;

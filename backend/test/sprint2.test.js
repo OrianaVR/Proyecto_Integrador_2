@@ -171,6 +171,53 @@ describe('HU-09 - Registro de cuota semanal', () => {
   });
 });
 
+describe('HU-10 - Registrar multas de tránsito', () => {
+  test('Happy Path: la multa se suma al saldo y al pagarla se descuenta', async () => {
+    const { response, payload } = await api('/api/multas', {
+      method: 'POST', body: { clienteId: 'c1', contratoId: 'ct1', monto: 50, descripcion: 'Fotomulta', fecha: isoDate(0) },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(readDb().contratos[0].saldoPendiente, 450);
+    const { payload: multas } = await api('/api/multas/cliente/c1');
+    assert.equal(multas.data.length, 1);
+    await api(`/api/multas/${payload.data.id}/pagar`, { method: 'PATCH' });
+    const db = readDb();
+    assert.equal(db.multas[0].pagada, true);
+    assert.equal(db.contratos[0].saldoPendiente, 400);
+  });
+
+  test('Flujo alternativo: rechaza montos no positivos y contratos de otro cliente', async () => {
+    const negativo = await api('/api/multas', { method: 'POST', body: { clienteId: 'c1', contratoId: 'ct1', monto: -5, fecha: isoDate(0) } });
+    assert.equal(negativo.response.status, 400);
+    const ajeno = await api('/api/multas', { method: 'POST', body: { clienteId: 'c1', contratoId: 'no-existe', monto: 50, fecha: isoDate(0) } });
+    assert.equal(ajeno.response.status, 404);
+    assert.match(ajeno.payload.error, /Contrato no encontrado/);
+    assert.equal(readDb().multas.length, 0);
+  });
+});
+
+describe('HU-11 - Registrar excedentes y cargos adicionales', () => {
+  test('Happy Path: el cargo se suma al saldo y al pagarlo se descuenta', async () => {
+    const { response, payload } = await api('/api/cargos-adicionales', {
+      method: 'POST', body: { clienteId: 'c1', contratoId: 'ct1', concepto: 'Excedente de kilometraje', monto: 30 },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(readDb().contratos[0].saldoPendiente, 430);
+    await api(`/api/cargos-adicionales/${payload.data.id}/pagar`, { method: 'PATCH' });
+    assert.equal(readDb().contratos[0].saldoPendiente, 400);
+  });
+
+  test('Flujo alternativo: no permite pagar dos veces el mismo cargo', async () => {
+    const { payload } = await api('/api/cargos-adicionales', {
+      method: 'POST', body: { clienteId: 'c1', contratoId: 'ct1', concepto: 'Casco', monto: 30 },
+    });
+    await api(`/api/cargos-adicionales/${payload.data.id}/pagar`, { method: 'PATCH' });
+    const { response } = await api(`/api/cargos-adicionales/${payload.data.id}/pagar`, { method: 'PATCH' });
+    assert.equal(response.status, 400);
+    assert.equal(readDb().contratos[0].saldoPendiente, 400);
+  });
+});
+
 describe('HU-12 - Cálculo del total semanal', () => {
   test('Happy Path: multiplica monto por cantidad de cuotas', async () => {
     const { response, payload } = await api('/api/cuotas/calcular-total', {

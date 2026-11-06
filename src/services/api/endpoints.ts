@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, PagoPendiente, ReporteFinanciero, Notificacion, AlertaFalloGPS } from '@/types';
+import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, PagoPendiente, ReporteFinanciero, Notificacion, AlertaFalloGPS, Multa, CargoAdicional } from '@/types';
 
 export async function login(email: string, password: string) {
   const { data } = await apiClient.post<ApiResponse<{ token: string; user: UsuarioAutenticado }>>('/auth/login', { email, password });
@@ -123,5 +123,37 @@ export async function getFallosGps() {
 export async function resolverAlerta(id: string) {
   const { data } = await apiClient.patch<ApiResponse<AlertaFalloGPS>>(`/alertas/${id}/resolver`);
   if (!data.success || !data.data) throw new Error(data.error || 'No se pudo resolver la alerta');
+  return data.data;
+}
+
+// ─── Multas de tránsito (HU-10) y excedentes / cargos adicionales (HU-11) ───
+export async function getMultasByCliente(clienteId: string) {
+  const { data } = await apiClient.get<ApiResponse<Multa[]>>(`/multas/cliente/${clienteId}`);
+  if (!data.success || !data.data) throw new Error(data.error || 'Error cargando multas');
+  return data.data;
+}
+export async function createMulta(payload: { clienteId: string; contratoId: string; monto: number; descripcion: string; fecha: string }) {
+  const { data } = await apiClient.post<ApiResponse<Multa>>('/multas', payload);
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo registrar la multa');
+  return data.data;
+}
+export async function pagarMulta(id: string) {
+  const { data } = await apiClient.patch<ApiResponse<Multa>>(`/multas/${id}/pagar`);
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo marcar la multa como pagada');
+  return data.data;
+}
+export async function getCargosByCliente(clienteId: string) {
+  const { data } = await apiClient.get<ApiResponse<CargoAdicional[]>>(`/cargos-adicionales/cliente/${clienteId}`);
+  if (!data.success || !data.data) throw new Error(data.error || 'Error cargando cargos');
+  return data.data;
+}
+export async function createCargo(payload: { clienteId: string; contratoId: string; concepto: string; monto: number }) {
+  const { data } = await apiClient.post<ApiResponse<CargoAdicional>>('/cargos-adicionales', payload);
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo registrar el cargo');
+  return data.data;
+}
+export async function pagarCargo(id: string) {
+  const { data } = await apiClient.patch<ApiResponse<CargoAdicional>>(`/cargos-adicionales/${id}/pagar`);
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo marcar el cargo como pagado');
   return data.data;
 }

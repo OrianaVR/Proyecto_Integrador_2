@@ -10,6 +10,7 @@ import type { ScoreCategoria } from '@/types';
 import type { ClienteConDetalle } from '@/types';
 import { getErrorMessage } from '@/services/api/client';
 import CuotasPagosPanel from '@/components/fee/feePaymentPage';
+import MultasCargosPanel from '@/components/fee/finesChargesPanel';
 
 const formatCOP=(n:number)=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n);
 const scoreColors: Record<ScoreCategoria, string> = { excelente: '#22c55e', bueno: '#3b82f6', regular: '#eab308', malo: '#ef4444' };
@@ -190,6 +191,10 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
 
         {/* Cuotas y pagos (HU-09, HU-13, HU-16, HU-22) */}
         <CuotasPagosPanel clienteId={cliente.id} contrato={contrato} proximaCuota={data.proximaCuota}
+          onChanged={() => { getClient(id).then(setData).catch(error => setError(getErrorMessage(error))); }} />
+
+        {/* Multas de tránsito y cargos adicionales (HU-10, HU-11) */}
+        <MultasCargosPanel clienteId={cliente.id} contrato={contrato}
           onChanged={() => { getClient(id).then(setData).catch(error => setError(getErrorMessage(error))); }} />
 
         {/* Historial timeline */}
