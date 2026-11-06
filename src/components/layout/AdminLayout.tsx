@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState } from 'react';
 import {
   LayoutDashboard, Users, Bike, AlertTriangle, UserPlus,
-  LogOut, Menu, Zap, ChevronRight, BarChart3,
+  LogOut, Menu, Zap, ChevronRight, BarChart3, ShieldCheck,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { href: '/admin/clientes',        label: 'Clientes',             icon: Users },
   { href: '/admin/clientes/nuevo',  label: 'Nuevo Cliente',        icon: UserPlus },
   { href: '/admin/motocicletas',    label: 'Motocicletas',         icon: Bike },
+  { href: '/admin/pagos',           label: 'Verificación de Pagos', icon: ShieldCheck },
   { href: '/admin/desactivaciones', label: 'Desactivaciones',      icon: AlertTriangle },
 ];
 

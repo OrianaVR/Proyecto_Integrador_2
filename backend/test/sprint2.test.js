@@ -210,6 +210,40 @@ describe('HU-13 - Registro de pago', () => {
   });
 });
 
+describe('HU-15 - Verificación de pagos', () => {
+  const registrarPago = () => api('/api/pagos', {
+    method: 'POST', body: { contratoId: 'ct1', cuotaId: 'cuota-1', monto: 100, metodoPago: 'nequi', referencia: 'REF-1' },
+  });
+
+  test('Happy Path: el pago queda pendiente y al aprobarlo no se descuenta dos veces', async () => {
+    const { payload: registro } = await registrarPago();
+    assert.equal(registro.data.estado, 'PENDIENTE');
+    const { payload: pendientes } = await api('/api/pagos/pendientes');
+    assert.equal(pendientes.data.length, 1);
+    assert.equal(pendientes.data[0].cliente.id, 'c1');
+    const { response, payload } = await api(`/api/pagos/${registro.data.id}/aprobar`, { method: 'PATCH' });
+    assert.equal(response.status, 200);
+    assert.equal(payload.data.estado, 'APROBADO');
+    const db = readDb();
+    assert.equal(db.pagos[0].estado, 'APROBADO');
+    assert.equal(db.contratos[0].saldoPendiente, 300);
+  });
+
+  test('Flujo alternativo: al rechazarlo se revierten el saldo y la cuota', async () => {
+    const { payload: registro } = await registrarPago();
+    const { response, payload } = await api(`/api/pagos/${registro.data.id}/rechazar`, {
+      method: 'PATCH', body: { razon: 'Comprobante ilegible' },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(payload.data.estado, 'RECHAZADO');
+    const db = readDb();
+    assert.equal(db.pagos[0].razonRechazo, 'Comprobante ilegible');
+    assert.equal(db.contratos[0].saldoPendiente, 400);
+    assert.equal(db.cuotas[0].estado, 'pendiente');
+    assert.equal(db.contratos[0].cuotasPagadas, 0);
+  });
+});
+
 describe('HU-01 - Notificación automática de cobro', () => {
   test('Happy Path: genera aviso para una cuota que vence hoy', async () => {
     const db = readDb();

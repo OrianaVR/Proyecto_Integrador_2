@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, FileText, Loader2, Plus, Receipt, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock, FileText, Loader2, Plus, Receipt, X, XCircle } from 'lucide-react';
 import { createCuota, createPago, getCuotasByContrato, getPagosByCliente } from '@/services/api/endpoints';
 import ProximaCuotaCard, { formatCOP, parseFecha } from './nextFeeCard';
 import type { Contrato, Cuota, Pago } from '@/types';
@@ -369,17 +369,25 @@ export default function CuotasPagosPanel({ clienteId, contrato, proximaCuota, on
           <div className="max-h-72 overflow-y-auto divide-y divide-white/5">
             {pagos.map((p) => {
               const c = cuotaDe(p.cuotaId);
+              // HU-15: estado de verificación (los pagos anteriores a la verificación no tienen estado y se ven como aprobados)
+              const pendiente = p.estado === 'PENDIENTE', rechazado = p.estado === 'RECHAZADO';
               return (
                 <div key={p.id} className="flex items-center gap-3 py-3">
-                  <div className="w-8 h-8 rounded-full bg-green-500/15 flex items-center justify-center shrink-0">
-                    <CheckCircle2 className="w-4 h-4 text-green-400" />
+                  <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${pendiente ? 'bg-yellow-500/15' : rechazado ? 'bg-red-500/15' : 'bg-green-500/15'}`}>
+                    {pendiente ? <Clock className="w-4 h-4 text-yellow-400" /> : rechazado ? <XCircle className="w-4 h-4 text-red-400" /> : <CheckCircle2 className="w-4 h-4 text-green-400" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-white font-medium">{formatCOP(p.monto)}{c ? ` · cuota #${c.numeroCuota}` : ''}</p>
+                    <p className="text-sm text-white font-medium">
+                      {formatCOP(p.monto)}{c ? ` · cuota #${c.numeroCuota}` : ''}
+                      <span className={`ml-2 text-[10px] font-semibold ${pendiente ? 'text-yellow-400' : rechazado ? 'text-red-400' : 'text-green-400'}`}>
+                        {pendiente ? 'Pendiente de verificación' : rechazado ? 'Rechazado' : 'Aprobado'}
+                      </span>
+                    </p>
                     <p className="text-xs text-[#666666]">
                       {fechaHora(p.fechaPago)} · <span className="capitalize">{p.metodoPago}</span>
                       {p.referencia ? ` · ref. ${p.referencia}` : ''}
                     </p>
+                    {rechazado && p.razonRechazo && <p className="text-xs text-red-400/80">Motivo: {p.razonRechazo}</p>}
                   </div>
                   {p.comprobante && (
                     <a href={`${API_ORIGIN}${p.comprobante}`} target="_blank" rel="noreferrer"

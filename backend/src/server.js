@@ -290,7 +290,19 @@ app.patch('/api/cargos-adicionales/:id/pagar', authenticate, authorize('admin'),
 // ───────────────────────────── MANUAL PAYMENT VERIFICATION ──────────────────────────────
 app.get('/api/pagos/pendientes', authenticate, authorize('admin'), (req, res) => {
   const db = readDb();
-  const pending = db.pagos.filter(p => p.estado === 'PENDIENTE');
+  // Se incluyen cliente, moto y cuota para mostrarlos en la pantalla de verificación (HU-15); el más antiguo primero
+  const pending = db.pagos
+    .filter(p => p.estado === 'PENDIENTE')
+    .sort((a, b) => a.fechaPago.localeCompare(b.fechaPago))
+    .map(p => {
+      const contrato = db.contratos.find(c => c.id === p.contratoId);
+      return {
+        ...p,
+        cliente: db.clientes.find(c => c.id === p.clienteId) || null,
+        motocicleta: contrato ? db.motocicletas.find(m => m.id === contrato.motocicletaId) || null : null,
+        cuota: p.cuotaId ? db.cuotas.find(c => c.id === p.cuotaId) || null : null,
+      };
+    });
   ok(res, pending);
 });
 
