@@ -179,6 +179,8 @@ app.post('/api/multas', authenticate, authorize('admin'), async (req, res) => {
   const result = updateDb(db => {
     const cliente = db.clientes.find(c => c.id === clienteId);
     if (!cliente) throw new Error('CLIENTE_NOT_FOUND');
+    // El contrato (si se indica) debe ser del mismo cliente; si no, el saldo no se actualizaría
+    if (contratoId && !db.contratos.some(c => c.id === contratoId && c.clienteId === clienteId)) throw new Error('CONTRACT_NOT_FOUND');
     const multa = {
       id: id('multa'),
       clienteId,
@@ -241,6 +243,8 @@ app.post('/api/cargos-adicionales', authenticate, authorize('admin'), (req, res)
   const result = updateDb(db => {
     const cliente = db.clientes.find(c => c.id === clienteId);
     if (!cliente) throw new Error('CLIENTE_NOT_FOUND');
+    // El contrato (si se indica) debe ser del mismo cliente; si no, el saldo no se actualizaría
+    if (contratoId && !db.contratos.some(c => c.id === contratoId && c.clienteId === clienteId)) throw new Error('CONTRACT_NOT_FOUND');
     const cargo = {
       id: id('cargo'),
       clienteId,

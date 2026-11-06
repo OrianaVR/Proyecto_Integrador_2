@@ -11,16 +11,16 @@ const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/ap
 const TIPOS_COMPROBANTE = ['application/pdf', 'image/jpeg', 'image/png'];
 const MAX_COMPROBANTE = 5 * 1024 * 1024; // mismo límite que el backend (5 MB)
 
-const inputCls = 'w-full px-3 py-2.5 rounded-xl bg-[#141414] border border-white/10 text-sm text-white placeholder:text-[#555555] focus:outline-none focus:border-[#C0001A]/60';
-const btnPrimary = 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#C0001A] text-white text-sm font-semibold hover:bg-[#a30016] disabled:opacity-60 transition';
-const btnGhost = 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-sm text-[#A0A0A0] hover:text-white hover:bg-white/5 transition';
+export const inputCls = 'w-full px-3 py-2.5 rounded-xl bg-[#141414] border border-white/10 text-sm text-white placeholder:text-[#555555] focus:outline-none focus:border-[#C0001A]/60';
+export const btnPrimary = 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-[#C0001A] text-white text-sm font-semibold hover:bg-[#a30016] disabled:opacity-60 transition';
+export const btnGhost = 'inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-sm text-[#A0A0A0] hover:text-white hover:bg-white/5 transition';
 
-function errMsg(e: unknown) {
+export function errMsg(e: unknown) {
   const x = e as { response?: { data?: { error?: string } }; message?: string };
   return x.response?.data?.error || x.message || 'Ocurrió un error inesperado';
 }
 
-const num = (v: string) => (v.trim() === '' ? 0 : Number(v));
+export const num = (v: string) => (v.trim() === '' ? 0 : Number(v));
 
 function toISODate(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -37,7 +37,7 @@ function proximoMiercoles() {
 
 const fechaHora = (iso: string) => new Date(iso).toLocaleString('es-CO', { dateStyle: 'medium', timeStyle: 'short' });
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+export function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
       <span className="text-xs font-semibold text-[#A0A0A0] uppercase tracking-wide">{label}</span>
@@ -47,7 +47,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-function ErrorBox({ message }: { message: string }) {
+export function ErrorBox({ message }: { message: string }) {
   return (
     <div role="alert" className="flex gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
       <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" /> <span>{message}</span>
@@ -55,7 +55,7 @@ function ErrorBox({ message }: { message: string }) {
   );
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('keydown', onKey);
