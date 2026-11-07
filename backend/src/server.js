@@ -560,7 +560,8 @@ app.get('/api/notificaciones/cliente/:clienteId', authenticate, (req, res) => {
 });
 app.post('/api/jobs/cobro-automatico', authenticate, authorize('admin'), async (req, res) => {
   try {
-    const fecha = req.body?.fecha || req.query?.fecha || null;
+    // Sin fecha, se toman las cuotas que vencen hoy en Colombia (HU-03)
+    const fecha = req.body?.fecha || req.query?.fecha || fechaColombia();
     const resultado = await processAutomaticCollection(fecha);
     ok(res, resultado, 'Proceso de cobro automático ejecutado correctamente');
   } catch (err) {
@@ -572,12 +573,36 @@ app.post('/api/jobs/run', authenticate, authorize('admin'), async (_req,res)=>ok
 // ───────────────────────────── CONFIGURACIÓN GENERAL DE NOTIFICACIONES (HU-04) ─────────────────
 function configNotificaciones(db) {
   const cfg = db.configuracion_notificacion?.[0] || {};
+  const p = programacion(db);
   return {
     ...cfg,
     canalPorDefecto: CANALES.includes(cfg.canalPorDefecto) ? cfg.canalPorDefecto : 'whatsapp',
     canalesHabilitados: Array.isArray(cfg.canalesHabilitados) ? cfg.canalesHabilitados : [...CANALES],
+    // HU-03: programación del envío automático de cobros
+    diaSemana: p.diaSemana, hora: p.hora, minuto: p.minuto, horaTexto: p.horaTexto,
+    proximoEnvio: proximoEnvio(p), programacionActiva: cronActivo, zonaHoraria: ZONA_HORARIA,
   };
 }
+
+/** Crea el registro de configuración si la base aún no lo tiene */
+function asegurarConfig(db) {
+  if (!Array.isArray(db.configuracion_notificacion) || !db.configuracion_notificacion.length) db.configuracion_notificacion = [{ id: 'conf-1', diaSemana: 3, hora: 8, minuto: 0 }];
+  return db.configuracion_notificacion[0];
+}
+
+// HU-03: día y hora del envío automático de cobros
+app.put('/api/configuracion/programacion', authenticate, authorize('admin'), (req, res) => {
+  const { diaSemana, hora } = req.body;
+  if (hora === undefined || hora === null || String(hora).trim() === '') return fail(res, 400, 'La hora de envío es obligatoria');
+  const partes = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(hora).trim());
+  if (!partes) return fail(res, 400, 'La hora no es válida: usa el formato HH:MM (de 00:00 a 23:59)');
+  const dia = Number(diaSemana);
+  if (diaSemana === undefined || diaSemana === null || String(diaSemana).trim() === '' || !Number.isInteger(dia) || dia < 0 || dia > 6) return fail(res, 400, 'El día de envío no es válido');
+  updateDb(db => { Object.assign(asegurarConfig(db), { diaSemana: dia, hora: Number(partes[1]), minuto: Number(partes[2]) }); });
+  // Se reprograma el cron de inmediato, sin reiniciar el servidor
+  if (cronActivo) scheduleNotificationCron();
+  ok(res, configNotificaciones(readDb()), 'Programación de envío actualizada');
+});
 
 app.get('/api/configuracion/notificaciones', authenticate, authorize('admin'), (_req, res) => {
   const db = readDb();
@@ -596,8 +621,7 @@ app.put('/api/configuracion/notificaciones', authenticate, authorize('admin'), (
   if (!Array.isArray(canalesHabilitados) || canalesHabilitados.length === 0 || !canalesHabilitados.every(c => CANALES.includes(c))) return fail(res, 400, 'Selecciona al menos un canal habilitado válido');
   if (!canalesHabilitados.includes(canalPorDefecto)) return fail(res, 400, 'El canal por defecto debe estar habilitado');
   const config = updateDb(db => {
-    if (!Array.isArray(db.configuracion_notificacion) || !db.configuracion_notificacion.length) db.configuracion_notificacion = [{ id: 'conf-1', diaSemana: 0, hora: 0 }];
-    Object.assign(db.configuracion_notificacion[0], { canalPorDefecto, canalesHabilitados: [...new Set(canalesHabilitados)] });
+    Object.assign(asegurarConfig(db), { canalPorDefecto, canalesHabilitados: [...new Set(canalesHabilitados)] });
     return configNotificaciones(db);
   });
   ok(res, { ...config, proveedores: estadoProveedores() }, 'Configuración de notificaciones guardada');
@@ -675,19 +699,50 @@ const BUSINESS_ERRORS = {
 app.use((err,req,res,_next)=>{ const esDocumento=req.path==='/api/clientes'; if(err instanceof multer.MulterError||err.message==='INVALID_FILE_TYPE') discardUploads(req); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?(esDocumento?'Cada documento no puede superar los 5 MB':'El comprobante no puede superar los 5 MB'):(esDocumento?'Los documentos enviados no son válidos':'El archivo del comprobante no es válido')); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,esDocumento?'Los documentos deben ser archivos PDF, JPG o PNG':'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); console.error(err); fail(res,500,'Error interno del servidor'); });
 
 // ───────────────────────────── SCHEDULE CRON ───────────────────────────────────
-// Notificación automática de cobro según configuración guardada
+// Notificación automática de cobro según configuración guardada (HU-03)
 const cron = require('node-cron');
+// El horario se interpreta en hora de Colombia aunque el servidor esté en otra zona (p. ej. UTC en la nube).
+// Colombia está en UTC-5 todo el año (no tiene horario de verano).
+const ZONA_HORARIA = 'America/Bogota';
+const OFFSET_COLOMBIA_HORAS = 5;
 let notificationTask = null;
-function scheduleNotificationCron() {
-  const cfg = readDb().configuracion_notificacion?.[0] || { diaSemana: 0, hora: 0 };
+let cronActivo = false;
+
+const dos = n => String(n).padStart(2, '0');
+
+/** Día (0 = domingo … 6 = sábado), hora y minuto configurados; por defecto miércoles 8:00 */
+function programacion(db = readDb()) {
+  const cfg = db.configuracion_notificacion?.[0] || {};
+  const valido = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
+  const diaSemana = valido(cfg.diaSemana, 0, 6) ? cfg.diaSemana : 3;
+  const hora = valido(cfg.hora, 0, 23) ? cfg.hora : 8;
+  const minuto = valido(cfg.minuto, 0, 59) ? cfg.minuto : 0;
   // Formato de node-cron: minuto hora díaDelMes mes díaDeLaSemana
-  const expr = `0 ${cfg.hora} * * ${cfg.diaSemana}`;
+  return { diaSemana, hora, minuto, horaTexto: `${dos(hora)}:${dos(minuto)}`, expresion: `${minuto} ${hora} * * ${diaSemana}` };
+}
+
+/** "Ahora" desplazado a Colombia: sus campos UTC (getUTCDay, getUTCHours…) son la fecha y hora de Colombia */
+const ahoraEnColombia = () => new Date(Date.now() - OFFSET_COLOMBIA_HORAS * 3600000);
+const fechaColombia = () => ahoraEnColombia().toISOString().slice(0, 10);
+
+/** Próxima fecha y hora (ISO, UTC) en que el cron enviará los cobros */
+function proximoEnvio({ diaSemana, hora, minuto }) {
+  const d = ahoraEnColombia();
+  let dias = (diaSemana - d.getUTCDay() + 7) % 7;
+  if (dias === 0 && d.getUTCHours() * 60 + d.getUTCMinutes() >= hora * 60 + minuto) dias = 7;
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + dias, hora + OFFSET_COLOMBIA_HORAS, minuto)).toISOString();
+}
+
+function scheduleNotificationCron() {
+  const p = programacion();
   if (notificationTask) notificationTask.stop();
-  notificationTask = cron.schedule(expr, async () => {
+  notificationTask = cron.schedule(p.expresion, async () => {
     console.log('Ejecutando proceso automático de cobro (cron) – configurado');
-    try { await processAutomaticCollection(); console.log('Proceso automático de cobro completado'); }
+    try { await processAutomaticCollection(fechaColombia()); console.log('Proceso automático de cobro completado'); }
     catch (err) { console.error('Error en proceso automático de cobro (cron):', err); }
-  });
+  }, { timezone: ZONA_HORARIA });
+  cronActivo = true;
+  console.log(`Cobros programados: ${p.expresion} (${ZONA_HORARIA})`);
 }
 
 function startServer(port = PORT) {
@@ -695,12 +750,13 @@ function startServer(port = PORT) {
     console.log(`MotoLeasing API escuchando en http://localhost:${server.address().port}`);
     try {
       if (readDb().usuarios.length === 0) await seed();
-      console.log('Jobs iniciales:', await runJobs());
+      // HU-03: los cobros no se envían al arrancar ni cada hora, solo en el día y la hora configurados
+      console.log('Jobs iniciales:', await runJobs({ cobro: false }));
     } catch(e) {
       console.error('No se pudieron ejecutar jobs iniciales:',e.message);
     }
   });
-  const timer = setInterval(()=>runJobs().catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
+  const timer = setInterval(()=>runJobs({ cobro: false }).catch(e=>console.error('Job automático:',e.message)), 60*60*1000);
   timer.unref();
   // inicializar al levantar el servidor
   scheduleNotificationCron();
