@@ -11,6 +11,7 @@ import type { ClienteConDetalle } from '@/types';
 import { getErrorMessage } from '@/services/api/client';
 import CuotasPagosPanel from '@/components/fee/feePaymentPage';
 import MultasCargosPanel from '@/components/fee/finesChargesPanel';
+import PasarelaPagosPanel from '@/components/fee/gatewayPaymentsPanel';
 import CanalNotificacionSelect from '@/components/notifications/notificationChannelSelect';
 
 const formatCOP=(n:number)=>new Intl.NumberFormat('es-CO',{style:'currency',currency:'COP',maximumFractionDigits:0}).format(n);
@@ -197,6 +198,10 @@ export default function ClienteDetallePage({ params }: { params: Promise<{ id: s
 
         {/* Multas de tránsito y cargos adicionales (HU-10, HU-11) */}
         <MultasCargosPanel clienteId={cliente.id} contrato={contrato}
+          onChanged={() => { getClient(id).then(setData).catch(error => setError(getErrorMessage(error))); }} />
+
+        {/* Verificación automática de pagos por pasarela (HU-14) */}
+        <PasarelaPagosPanel clienteId={cliente.id} historial={historial}
           onChanged={() => { getClient(id).then(setData).catch(error => setError(getErrorMessage(error))); }} />
 
         {/* Historial timeline */}

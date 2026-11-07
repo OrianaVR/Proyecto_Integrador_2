@@ -1,12 +1,13 @@
 'use client';
 
 import AdminLayout from '@/components/layout/AdminLayout';
-import { getPagosPendientes, aprobarPago, rechazarPago } from '@/services/api/endpoints';
+import { getPagosPendientes, aprobarPago, rechazarPago, getTransaccionesPasarela } from '@/services/api/endpoints';
+import { TransaccionesPasarelaLista } from '@/components/fee/gatewayPaymentsPanel';
 import { getErrorMessage } from '@/services/api/client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ShieldCheck, CheckCircle2, XCircle, Loader2, FileText, AlertTriangle, Clock, ExternalLink } from 'lucide-react';
-import type { PagoPendiente } from '@/types';
+import type { PagoPendiente, TransaccionPasarela } from '@/types';
 
 // HU-15 Verificación de pagos: el admin revisa cada pago registrado y lo aprueba o lo rechaza.
 const API_ORIGIN = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api').replace(/\/api\/?$/, '');
@@ -28,6 +29,7 @@ export default function VerificacionPagosPage() {
   const [aviso, setAviso] = useState('');
   const [aprobados, setAprobados] = useState(0);
   const [rechazados, setRechazados] = useState(0);
+  const [transacciones, setTransacciones] = useState<TransaccionPasarela[]>([]);
 
   useEffect(() => {
     let activo = true;
@@ -35,6 +37,8 @@ export default function VerificacionPagosPage() {
       .then(data => { if (activo) setPagos(data); })
       .catch(error => { if (activo) setErrorCarga(getErrorMessage(error)); })
       .finally(() => { if (activo) setCargando(false); });
+    // HU-14: pagos recibidos por la pasarela (se verifican solos; aquí se ven los rechazados y los que requieren revisión)
+    getTransaccionesPasarela().then(d => { if (activo) setTransacciones(d.transacciones); }).catch(() => {});
     return () => { activo = false; };
   }, []);
 
@@ -214,6 +218,15 @@ export default function VerificacionPagosPage() {
             })}
           </div>
         )}
+
+        {/* HU-14: verificación automática por pasarela */}
+        <div className="rounded-2xl border border-white/8 bg-[#1F1F1F]/60 p-5 space-y-3">
+          <div>
+            <p className="text-xs font-semibold text-[#666666] uppercase tracking-wider">Verificados automáticamente por la pasarela</p>
+            <p className="text-xs text-[#666666] mt-1">Estos pagos no necesitan aprobación manual: los rechazados por el banco no cambian el saldo y los que no coinciden quedan para revisión.</p>
+          </div>
+          <TransaccionesPasarelaLista transacciones={transacciones} mostrarCliente />
+        </div>
       </div>
     </AdminLayout>
   );

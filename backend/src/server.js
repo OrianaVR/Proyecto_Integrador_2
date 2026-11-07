@@ -12,6 +12,7 @@ const { createNotification, CANALES, estadoProveedores } = require('./notificati
 const { runJobs, processAutomaticCollection } = require('./jobs');
 const { seed } = require('./seed');
 const { generarReporteFinanciero, exportarReportePDF, exportarReporteExcel } = require('./reports');
+const { ESTADOS, ESTADO_EXITOSO, ESTADO_LABEL, simulacionPasarela, referenciaCuota, cuotaDeReferencia, firmaValida, construirEvento, confirmarConPasarela } = require('./pasarela');
 
 ensureDb();
 const app = express();
@@ -493,6 +494,119 @@ app.post('/api/webhooks/pago-aprobado', async (req, res) => {
     fail(res, 500, 'Error procesando encendido');
   }
 });
+// ───────────────────────── HU-14 VERIFICACIÓN AUTOMÁTICA (PASARELA) ─────────────────────────
+/**
+ * Concilia una transacción de la pasarela contra la cuota y el saldo pendiente del cliente.
+ * APLICADO: pago aprobado y aplicado (cuota pagada, saldo descontado, score actualizado).
+ * RECHAZADA: la entidad bancaria rechazó/anuló la transacción → el saldo no cambia.
+ * NO_ENCONTRADA: la referencia o la transacción no existen → el saldo no cambia.
+ * REVISION: aprobada pero el monto no coincide o la cuota ya estaba pagada → la revisa el admin.
+ */
+async function conciliarTransaccion(tx) {
+  const estado = String(tx.status || '').toUpperCase();
+  const registro = updateDb(db => {
+    if (!db.transacciones_pasarela) db.transacciones_pasarela = [];
+    const previa = db.transacciones_pasarela.find(t => t.transaccionId === tx.id);
+    // La pasarela puede reenviar el mismo evento: no se aplica dos veces
+    if (previa && (previa.estado === estado || previa.resultado === 'APLICADO')) return { ...previa, duplicada: true };
+
+    const monto = Number(tx.amount_in_cents) / 100;
+    const noEncontrada = estado === 'NOT_FOUND';
+    const cuota = noEncontrada ? null : cuotaDeReferencia(db.cuotas, tx.reference);
+    const contrato = cuota ? db.contratos.find(c => c.id === cuota.contratoId) : null;
+    const reg = {
+      id: previa?.id || id('tx'), transaccionId: tx.id, referencia: tx.reference || null, estado, monto,
+      metodo: tx.payment_method_type || null, cuotaId: cuota?.id || null, numeroCuota: cuota?.numeroCuota ?? null,
+      contratoId: contrato?.id || null, clienteId: contrato?.clienteId || null, pagoId: null,
+      resultado: '', mensaje: '', alDia: false, fecha: new Date().toISOString(),
+    };
+
+    if (noEncontrada) {
+      reg.resultado = 'NO_ENCONTRADA'; reg.mensaje = 'La pasarela no encontró la transacción: el saldo pendiente se mantiene';
+    } else if (!cuota || !contrato) {
+      reg.resultado = 'NO_ENCONTRADA'; reg.mensaje = 'La referencia de pago no corresponde a ninguna cuota: el saldo pendiente se mantiene';
+    } else if (estado !== ESTADO_EXITOSO) {
+      reg.resultado = 'RECHAZADA'; reg.mensaje = `Transacción ${ESTADO_LABEL[estado] || estado.toLowerCase()} por la entidad bancaria: el saldo pendiente se mantiene`;
+    } else if (cuota.estado === 'pagado') {
+      reg.resultado = 'REVISION'; reg.mensaje = `La cuota #${cuota.numeroCuota} ya estaba pagada: revisa si es un pago duplicado`;
+    } else if (monto !== Number(cuota.monto)) {
+      reg.resultado = 'REVISION'; reg.mensaje = `El monto recibido ($${monto.toLocaleString('es-CO')}) no coincide con la cuota #${cuota.numeroCuota} ($${Number(cuota.monto).toLocaleString('es-CO')})`;
+    } else {
+      const fechaPago = new Date().toISOString();
+      const pago = { id: id('pago'), contratoId: contrato.id, cuotaId: cuota.id, clienteId: contrato.clienteId, monto, metodoPago: 'pasarela', referencia: tx.id, comprobante: null, registradoPor: 'pasarela', fechaPago, notas: `Verificado automáticamente (referencia ${tx.reference})`, estado: 'APROBADO' };
+      db.pagos.push(pago);
+      cuota.estado = 'pagado'; cuota.fechaPago = fechaPago.slice(0, 10); cuota.diasMorosidad = 0; cuota.referencia = tx.id;
+      contrato.cuotasPagadas = Math.min(contrato.cuotasTotales, contrato.cuotasPagadas + 1);
+      contrato.saldoPendiente = Math.max(0, contrato.saldoPendiente - monto); contrato.actualizadoEn = fechaPago;
+      const cuotas = db.cuotas.filter(c => c.contratoId === contrato.id); const score = calculateScore(cuotas); const old = db.scores.find(s => s.clienteId === contrato.clienteId); db.scores = db.scores.filter(s => s.clienteId !== contrato.clienteId); db.scores.push({ ...old, ...score, clienteId: contrato.clienteId, cuotasPagadas: contrato.cuotasPagadas, cuotasTotales: contrato.cuotasTotales, ultimaActualizacion: fechaPago.slice(0, 10) });
+      reg.pagoId = pago.id; reg.resultado = 'APLICADO';
+      reg.alDia = !cuotas.some(c => c.estado === 'vencido');
+      reg.mensaje = reg.alDia ? 'Pago verificado y aplicado: el cliente quedó al día' : 'Pago verificado y aplicado: el cliente aún tiene cuotas vencidas';
+    }
+
+    if (reg.resultado !== 'APLICADO') {
+      db.logs.push({ id: id('log'), nivel: 'WARN', mensaje: `Pasarela ${tx.id} (${tx.reference || 'sin referencia'}): ${reg.mensaje}`, timestamp: reg.fecha });
+      db.notificaciones.push({ id: id('not'), clienteId: null, destinatario: 'admin', tipo: 'fallo_pago', titulo: reg.resultado === 'REVISION' ? 'Pago por pasarela requiere revisión' : 'Falló una transacción de la pasarela', mensaje: reg.mensaje, contratoId: reg.contratoId, cuotaId: reg.cuotaId, canal: 'sistema', estado: 'pendiente', fecha: reg.fecha });
+    }
+    db.transacciones_pasarela = db.transacciones_pasarela.filter(t => t.transaccionId !== tx.id);
+    db.transacciones_pasarela.push(reg);
+    return reg;
+  });
+  if (registro.duplicada) return registro;
+
+  if (registro.resultado === 'APLICADO') {
+    await createNotification({ clienteId: registro.clienteId, contratoId: registro.contratoId, cuotaId: registro.cuotaId, tipo: 'pago', monto: registro.monto, titulo: 'Pago confirmado', mensaje: `Recibimos tu pago de $${registro.monto.toLocaleString('es-CO')} de la cuota #${registro.numeroCuota}.${registro.alDia ? ' Tu cuenta está al día.' : ''}` });
+    // Habilitación: si ya no tiene cuotas vencidas, se reactiva la moto apagada por mora
+    if (registro.alDia) await encenderMotoIfMora({ contratoId: registro.contratoId });
+  } else if (registro.resultado === 'RECHAZADA' && registro.clienteId) {
+    await createNotification({ clienteId: registro.clienteId, contratoId: registro.contratoId, cuotaId: registro.cuotaId, tipo: 'pago_fallido', monto: registro.monto, titulo: 'Tu pago no fue aprobado', mensaje: `La transacción de $${registro.monto.toLocaleString('es-CO')} de la cuota #${registro.numeroCuota} fue ${ESTADO_LABEL[registro.estado] || 'rechazada'} por tu banco. Tu saldo pendiente no cambió; intenta pagar de nuevo.` });
+  }
+  return registro;
+}
+
+/** Valida el evento de la pasarela y concilia la transacción */
+async function procesarEventoPasarela(evento) {
+  const tx = evento?.data?.transaction;
+  if (!tx?.id) throw new Error('PASARELA_EVENTO_INVALIDO');
+  if (!firmaValida(evento)) throw new Error('PASARELA_FIRMA_INVALIDA');
+  if (evento.event !== 'transaction.updated' || String(tx.status).toUpperCase() === 'PENDING') return { ignorado: true, transaccionId: tx.id };
+  // Si hay API de la pasarela configurada, se confirma la transacción con ella (no se confía solo en el evento)
+  const confirmada = await confirmarConPasarela(tx);
+  if (!confirmada) return conciliarTransaccion({ ...tx, status: 'NOT_FOUND' });
+  return conciliarTransaccion({ ...tx, status: confirmada.status, amount_in_cents: confirmada.amount_in_cents, reference: confirmada.reference });
+}
+
+// Webhook que llama la pasarela (no usa JWT: se valida con la firma del evento)
+app.post('/api/webhooks/pasarela', async (req, res) => {
+  // El secreto de sandbox es público (está en el código): el webhook externo exige el secreto real del .env
+  if (!process.env.PASARELA_EVENTS_SECRET) return fail(res, 503, 'La pasarela de pagos no está configurada');
+  const resultado = await procesarEventoPasarela(req.body);
+  ok(res, resultado, resultado.ignorado ? 'Evento recibido sin cambios' : resultado.mensaje);
+});
+
+// Sandbox local: simula la respuesta de la pasarela para una cuota (solo en modo simulación)
+app.post('/api/pagos/pasarela/simular', authenticate, authorize('admin'), async (req, res) => {
+  if (!simulacionPasarela()) return fail(res, 403, 'La simulación de la pasarela está desactivada');
+  const { cuotaId, estado = 'APPROVED', monto, referencia } = req.body;
+  if (!ESTADOS.includes(estado)) return fail(res, 400, 'Estado de transacción no válido');
+  const cuota = cuotaId ? readDb().cuotas.find(c => c.id === cuotaId) : null;
+  if (cuotaId && !cuota) return fail(res, 404, 'Cuota no encontrada');
+  const valor = monto !== undefined ? Number(monto) : Number(cuota?.monto);
+  if (!Number.isFinite(valor) || valor <= 0) return fail(res, 400, 'El monto debe ser un número mayor que cero');
+  const evento = construirEvento({ id: `sim-${Date.now()}-${Math.floor(Math.random() * 1e4)}`, reference: referencia || (cuota ? referenciaCuota(cuota.id) : ''), status: estado, amount_in_cents: Math.round(valor * 100), currency: 'COP', payment_method_type: 'PSE' });
+  const resultado = await procesarEventoPasarela(evento);
+  ok(res, resultado, resultado.mensaje);
+});
+
+app.get('/api/pagos/pasarela/transacciones', authenticate, authorize('admin'), (req, res) => {
+  const db = readDb();
+  const lista = (db.transacciones_pasarela || [])
+    .filter(t => !req.query.clienteId || t.clienteId === req.query.clienteId)
+    .sort((a, b) => b.fecha.localeCompare(a.fecha))
+    .map(t => ({ ...t, cliente: db.clientes.find(c => c.id === t.clienteId) || null }));
+  ok(res, { simulacion: simulacionPasarela(), transacciones: lista });
+});
+
 // HU-20: si el comando manual falla por falta de señal, se registra una alerta de fallo para el admin
 async function falloControlGps(req,res,accion,e){
   if(e.message==='MOTO_NOT_FOUND') return fail(res,404,'Motocicleta no encontrada');
@@ -695,6 +809,8 @@ const BUSINESS_ERRORS = {
   CLIENTE_NOT_FOUND: [404, 'Cliente no encontrado'],
   MOTO_NOT_FOUND: [404, 'Motocicleta no encontrada'],
   ALERT_NOT_FOUND: [404, 'Alerta no encontrada'],
+  PASARELA_EVENTO_INVALIDO: [400, 'El evento de la pasarela no es válido'],
+  PASARELA_FIRMA_INVALIDA: [401, 'La firma del evento de la pasarela no es válida'],
 };
 app.use((err,req,res,_next)=>{ const esDocumento=req.path==='/api/clientes'; if(err instanceof multer.MulterError||err.message==='INVALID_FILE_TYPE') discardUploads(req); if(err instanceof multer.MulterError) return fail(res,400,err.code==='LIMIT_FILE_SIZE'?(esDocumento?'Cada documento no puede superar los 5 MB':'El comprobante no puede superar los 5 MB'):(esDocumento?'Los documentos enviados no son válidos':'El archivo del comprobante no es válido')); if(err.message==='INVALID_FILE_TYPE') return fail(res,400,esDocumento?'Los documentos deben ser archivos PDF, JPG o PNG':'El comprobante debe ser un archivo PDF, JPG o PNG'); const known=BUSINESS_ERRORS[err.message]; if(known) return fail(res,known[0],known[1]); console.error(err); fail(res,500,'Error interno del servidor'); });
 

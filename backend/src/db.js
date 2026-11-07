@@ -21,6 +21,7 @@ const EMPTY_DB = {
   multas: [],
   liquidaciones: [],
   logs: [],
+  transacciones_pasarela: [],
 };
 
 function ensureDb() {
