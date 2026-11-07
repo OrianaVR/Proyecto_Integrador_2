@@ -26,7 +26,9 @@ export interface Cliente {
 export interface ConfiguracionNotificaciones {
   canalPorDefecto: NotificationChannel;
   canalesHabilitados: NotificationChannel[];
-  diaSemana?: number; hora?: number;
+  // HU-03: programación del envío automático (0 = domingo … 6 = sábado), en hora de Colombia
+  diaSemana: number; hora: number; minuto: number; horaTexto: string;
+  proximoEnvio: string; programacionActiva: boolean; zonaHoraria: string;
   proveedores: Record<NotificationChannel, 'configurado' | 'simulado' | 'no_configurado'>;
   fallidos: { id: string; fecha: string; canal: NotificationChannel; error?: string; titulo: string; cliente: Cliente | null }[];
 }

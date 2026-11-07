@@ -314,6 +314,37 @@ describe('HU-01 - Notificación automática de cobro', () => {
   });
 });
 
+describe('HU-03 - Configurar fecha y hora de notificaciones', () => {
+  test('CP-HU03-01: guarda el nuevo día y hora y actualiza la programación', async () => {
+    const { response, payload } = await api('/api/configuracion/programacion', { method: 'PUT', body: { diaSemana: 3, hora: '08:30' } });
+    assert.equal(response.status, 200);
+    assert.equal(payload.data.diaSemana, 3);
+    assert.equal(payload.data.horaTexto, '08:30');
+    const cfg = readDb().configuracion_notificacion[0];
+    assert.equal(cfg.hora, 8);
+    assert.equal(cfg.minuto, 30);
+    // El próximo envío cae en miércoles a las 8:30 de Colombia (13:30 UTC)
+    const proximo = new Date(payload.data.proximoEnvio);
+    assert.equal(proximo.getUTCDay(), 3);
+    assert.equal(proximo.getUTCHours(), 13);
+    assert.equal(proximo.getUTCMinutes(), 30);
+    assert.ok(proximo.getTime() > Date.now());
+  });
+
+  test('CP-HU03-02: rechaza horas inválidas o vacías y no cambia la programación', async () => {
+    await api('/api/configuracion/programacion', { method: 'PUT', body: { diaSemana: 3, hora: '08:00' } });
+    for (const body of [{ diaSemana: 3, hora: '25:00' }, { diaSemana: 3, hora: '' }, { diaSemana: 3, hora: '8 am' }, { diaSemana: 9, hora: '08:00' }, { hora: '08:00' }]) {
+      const { response, payload } = await api('/api/configuracion/programacion', { method: 'PUT', body });
+      assert.equal(response.status, 400);
+      assert.ok(payload.error.length > 0);
+    }
+    const cfg = readDb().configuracion_notificacion[0];
+    assert.equal(cfg.diaSemana, 3);
+    assert.equal(cfg.hora, 8);
+    assert.equal(cfg.minuto, 0);
+  });
+});
+
 describe('HU-04 - Seleccionar canal de notificación', () => {
   test('CP-HU04-01: envía el cobro exclusivamente por el canal preferido del cliente', async () => {
     const db = readDb();

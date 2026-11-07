@@ -175,3 +175,9 @@ export async function saveConfigNotificaciones(payload: { canalPorDefecto: Notif
   if (!data.success || !data.data) throw new Error(data.error || 'No se pudo guardar la configuración');
   return data.data;
 }
+/** HU-03: día (0 = domingo … 6 = sábado) y hora "HH:MM" del envío automático de cobros */
+export async function saveProgramacion(payload: { diaSemana: number; hora: string }) {
+  const { data } = await apiClient.put<ApiResponse<ConfiguracionNotificaciones>>('/configuracion/programacion', payload);
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo guardar la programación');
+  return data.data;
+}

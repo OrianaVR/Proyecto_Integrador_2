@@ -137,7 +137,8 @@ async function seed() {
     {id:'ad2',clienteId:'c5',motocicletaId:'m5',motivo:'mora',diasMora:27,fechaProgramada:new Date(Date.now()+86400000).toISOString(),urgencia:'alta',atendida:false},
     {id:'ad3',clienteId:'c3',motocicletaId:'m3',motivo:'mora',diasMora:14,fechaProgramada:new Date(Date.now()+2*86400000).toISOString(),urgencia:'media',atendida:false},
   ];
-  db.configuracion_notificacion = [{ id: 'conf-1', diaSemana: 0, hora: 0 }];
+  // HU-03: los cobros se envían los miércoles a las 8:00 (configurable desde Configuración)
+  db.configuracion_notificacion = [{ id: 'conf-1', diaSemana: 3, hora: 8, minuto: 0 }];
   writeDb(db);
   console.log('Base de datos del MVP creada correctamente.');
 }

@@ -247,9 +247,11 @@ async function runWeeklyLiquidation() {
 }
 
 // Modificar runJobs para incluir el nuevo proceso
-async function runJobs() {
+// HU-03: el proceso que corre cada hora no envía los cobros (`cobro: false`); esos salen solo en el día y la hora
+// configurados (cron). La ejecución manual (POST /api/jobs/run) sí los incluye.
+async function runJobs({ cobro = true } = {}) {
   const overdue = markOverdueFees();
-  const collection = await processAutomaticCollection();
+  const collection = cobro ? await processAutomaticCollection() : { notifications: 0, cobroOmitido: 'Se envía en el día y la hora configurados' };
   const preCutoff = await processPreCutoffReminders();
   const shutdowns = autoShutdownMotos();
   const liquidation = await runWeeklyLiquidation();

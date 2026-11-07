@@ -1,11 +1,11 @@
 'use client';
 
 import AdminLayout from '@/components/layout/AdminLayout';
-import { getConfigNotificaciones, saveConfigNotificaciones } from '@/services/api/endpoints';
+import { getConfigNotificaciones, saveConfigNotificaciones, saveProgramacion, runAutomaticCollection } from '@/services/api/endpoints';
 import { getErrorMessage } from '@/services/api/client';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Settings, MessageCircle, Smartphone, Mail, CheckCircle2, AlertTriangle, Loader2, ExternalLink } from 'lucide-react';
+import { Settings, MessageCircle, Smartphone, Mail, CheckCircle2, AlertTriangle, Loader2, ExternalLink, CalendarClock, Send } from 'lucide-react';
 import type { ConfiguracionNotificaciones, NotificationChannel } from '@/types';
 
 // HU-04: configuración general del canal de notificación
@@ -22,6 +22,101 @@ const proveedorBadge: Record<string, { label: string; cls: string }> = {
 };
 
 const canalLabel = (c: string) => CANALES.find(x => x.value === c)?.label ?? c;
+
+// HU-03: día y hora del envío automático de cobros
+const DIAS = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+const ORDEN_DIAS = [1, 2, 3, 4, 5, 6, 0]; // lunes primero
+
+function ProgramacionEnvio({ config, onGuardado, onEnviado }: {
+  config: ConfiguracionNotificaciones;
+  onGuardado: (c: ConfiguracionNotificaciones) => void;
+  onEnviado: () => void;
+}) {
+  const [dia, setDia] = useState(String(config.diaSemana));
+  const [hora, setHora] = useState(config.horaTexto);
+  const [guardando, setGuardando] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [aviso, setAviso] = useState('');
+  const [error, setError] = useState('');
+
+  const guardar = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAviso(''); setError('');
+    if (!hora) return setError('La hora de envío es obligatoria.');
+    if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(hora)) return setError('La hora no es válida: usa el formato HH:MM (de 00:00 a 23:59).');
+    setGuardando(true);
+    try {
+      const data = await saveProgramacion({ diaSemana: Number(dia), hora });
+      onGuardado(data);
+      setAviso(`Programación actualizada: los cobros se enviarán los ${DIAS[data.diaSemana].toLowerCase()} a las ${data.horaTexto}.`);
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
+    } finally { setGuardando(false); }
+  };
+
+  // Envía ya los recordatorios de las cuotas que vencen hoy (para pruebas o si se necesita adelantar el envío)
+  const enviarAhora = async () => {
+    setAviso(''); setError(''); setEnviando(true);
+    try {
+      const r = await runAutomaticCollection();
+      const total = Number(r.totalCuotasEvaluadas ?? 0), enviadas = Number(r.notifications ?? 0);
+      setAviso(total === 0 ? 'Hoy no vence ninguna cuota: no había recordatorios por enviar.' : `Se procesaron ${total} cuota(s) que vencen hoy · ${enviadas} recordatorio(s) nuevo(s).`);
+      onEnviado();
+    } catch (err: unknown) {
+      setError(getErrorMessage(err));
+    } finally { setEnviando(false); }
+  };
+
+  const proximo = new Date(config.proximoEnvio).toLocaleString('es-CO', { timeZone: config.zonaHoraria, weekday: 'long', day: '2-digit', month: 'long', hour: '2-digit', minute: '2-digit' });
+
+  return (
+    <form onSubmit={guardar} className="rounded-2xl border border-white/8 bg-[#1F1F1F]/60 p-5 space-y-4">
+      <div>
+        <p className="text-xs font-semibold text-[#666666] uppercase tracking-wider flex items-center gap-1.5"><CalendarClock className="w-3.5 h-3.5" /> Programación del envío</p>
+        <p className="text-xs text-[#555555] mt-1">Día y hora en que se envían automáticamente los recordatorios de las cuotas que vencen ese día (hora de Colombia).</p>
+      </div>
+      <div className="grid sm:grid-cols-2 gap-4">
+        <label className="block">
+          <span className="text-xs font-semibold text-[#A0A0A0] uppercase tracking-wide">Día de envío</span>
+          <select value={dia} onChange={e => { setDia(e.target.value); setAviso(''); setError(''); }}
+            className="mt-1.5 w-full px-3 py-2.5 rounded-xl bg-[#141414] border border-white/10 text-sm text-white focus:outline-none focus:border-[#C0001A]/60">
+            {ORDEN_DIAS.map(d => <option key={d} value={d}>{DIAS[d]}</option>)}
+          </select>
+        </label>
+        <label className="block">
+          <span className="text-xs font-semibold text-[#A0A0A0] uppercase tracking-wide">Hora de envío</span>
+          <input type="time" value={hora} onChange={e => { setHora(e.target.value); setAviso(''); setError(''); }}
+            className="mt-1.5 w-full px-3 py-2.5 rounded-xl bg-[#141414] border border-white/10 text-sm text-white focus:outline-none focus:border-[#C0001A]/60" />
+        </label>
+      </div>
+      <p className="text-xs text-[#A0A0A0]">
+        Próximo envío: <span className="text-white font-medium">{proximo}</span>
+        {!config.programacionActiva && <span className="text-yellow-400"> · la programación se activa cuando el servidor está en ejecución</span>}
+      </p>
+
+      {error && (
+        <div role="alert" className="flex gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" /> {error}
+        </div>
+      )}
+      {aviso && (
+        <div role="status" className="flex items-center gap-2 p-3 rounded-xl bg-green-500/10 border border-green-500/20 text-green-400 text-sm">
+          <CheckCircle2 className="w-4 h-4 shrink-0" /> {aviso}
+        </div>
+      )}
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" onClick={enviarAhora} disabled={enviando}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 text-sm text-[#A0A0A0] hover:text-white hover:bg-white/5 disabled:opacity-60 transition">
+          {enviando ? <><Loader2 className="w-4 h-4 animate-spin" /> Enviando…</> : <><Send className="w-4 h-4" /> Enviar recordatorios de hoy</>}
+        </button>
+        <button type="submit" disabled={guardando}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#C0001A] text-white text-sm font-semibold hover:bg-[#a30016] disabled:opacity-60 transition">
+          {guardando ? <><Loader2 className="w-4 h-4 animate-spin" /> Guardando…</> : 'Guardar programación'}
+        </button>
+      </div>
+    </form>
+  );
+}
 
 export default function ConfiguracionPage() {
   const [config, setConfig] = useState<ConfiguracionNotificaciones | null>(null);
@@ -70,7 +165,7 @@ export default function ConfiguracionPage() {
           <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <Settings className="w-6 h-6 text-[#C0001A]" /> Configuración
           </h1>
-          <p className="text-sm text-[#666666] mt-0.5">Canales por los que se envían las notificaciones de cobro</p>
+          <p className="text-sm text-[#666666] mt-0.5">Canales y horario de las notificaciones de cobro</p>
         </div>
 
         {errorCarga ? (
@@ -130,6 +225,13 @@ export default function ConfiguracionPage() {
                 </button>
               </div>
             </div>
+
+            {/* Programación del envío (HU-03) */}
+            <ProgramacionEnvio
+              config={config}
+              onGuardado={data => setConfig(c => (c ? { ...c, diaSemana: data.diaSemana, hora: data.hora, minuto: data.minuto, horaTexto: data.horaTexto, proximoEnvio: data.proximoEnvio, programacionActiva: data.programacionActiva } : c))}
+              onEnviado={() => { getConfigNotificaciones().then(data => setConfig(c => (c ? { ...c, fallidos: data.fallidos } : c))).catch(() => {}); }}
+            />
 
             {/* Envíos fallidos */}
             <div className="rounded-2xl border border-white/8 bg-[#1F1F1F]/60 p-5">
