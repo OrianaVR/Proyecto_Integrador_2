@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, PagoPendiente, ReporteFinanciero, Notificacion, AlertaFalloGPS, Multa, CargoAdicional, NotificationChannel, ConfiguracionNotificaciones } from '@/types';
+import type { ApiResponse, Cliente, ClienteConDetalle, Contrato, Motocicleta, StatsResumen, AlertaDesactivacion, UsuarioAutenticado, ComandoGPS, Cuota, Pago, PagoPendiente, ReporteFinanciero, Notificacion, AlertaFalloGPS, Multa, CargoAdicional, NotificationChannel, ConfiguracionNotificaciones, TransaccionPasarela } from '@/types';
 
 export async function login(email: string, password: string) {
   const { data } = await apiClient.post<ApiResponse<{ token: string; user: UsuarioAutenticado }>>('/auth/login', { email, password });
@@ -111,6 +111,19 @@ export async function aprobarPago(id: string) {
 export async function rechazarPago(id: string, razon: string) {
   const { data } = await apiClient.patch<ApiResponse<Pago>>(`/pagos/${id}/rechazar`, { razon });
   if (!data.success || !data.data) throw new Error(data.error || 'No se pudo rechazar el pago');
+  return data.data;
+}
+
+// ─── Verificación automática por pasarela de pagos (HU-14) ─────────────────
+export async function getTransaccionesPasarela(clienteId?: string) {
+  const { data } = await apiClient.get<ApiResponse<{ simulacion: boolean; transacciones: TransaccionPasarela[] }>>('/pagos/pasarela/transacciones', { params: clienteId ? { clienteId } : undefined });
+  if (!data.success || !data.data) throw new Error(data.error || 'Error cargando las transacciones de la pasarela');
+  return data.data;
+}
+/** Sandbox: simula la respuesta de la pasarela (aprobada o rechazada) para una cuota */
+export async function simularPagoPasarela(cuotaId: string, estado: 'APPROVED' | 'DECLINED') {
+  const { data } = await apiClient.post<ApiResponse<TransaccionPasarela>>('/pagos/pasarela/simular', { cuotaId, estado });
+  if (!data.success || !data.data) throw new Error(data.error || 'No se pudo simular el pago');
   return data.data;
 }
 

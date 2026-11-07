@@ -70,7 +70,7 @@ export interface Cuota {
 
 export interface Pago {
   id: string; contratoId: string; cuotaId?: string; clienteId: string;
-  monto: number; metodoPago: 'efectivo' | 'transferencia' | 'tarjeta' | 'nequi' | 'daviplata';
+  monto: number; metodoPago: 'efectivo' | 'transferencia' | 'tarjeta' | 'nequi' | 'daviplata' | 'pasarela';
   referencia?: string; comprobante?: string; registradoPor: string;
   fechaPago: string; notas?: string;
   estado?: EstadoVerificacionPago; razonRechazo?: string;
@@ -120,6 +120,16 @@ export interface Multa {
 export interface CargoAdicional {
   id: string; clienteId: string; contratoId: string | null; concepto: string;
   monto: number; pagada: boolean; creadoEn: string;
+}
+
+/** HU-14: transacción recibida de la pasarela de pagos y su resultado de conciliación */
+export type EstadoTransaccionPasarela = 'APPROVED' | 'DECLINED' | 'VOIDED' | 'ERROR' | 'NOT_FOUND';
+export interface TransaccionPasarela {
+  id: string; transaccionId: string; referencia: string | null; estado: EstadoTransaccionPasarela;
+  monto: number; metodo: string | null; cuotaId: string | null; numeroCuota: number | null;
+  contratoId: string | null; clienteId: string | null; pagoId: string | null;
+  resultado: 'APLICADO' | 'RECHAZADA' | 'NO_ENCONTRADA' | 'REVISION'; mensaje: string; alDia: boolean;
+  fecha: string; cliente: Cliente | null;
 }
 
 /** HU-20: alerta de fallo del control remoto (no se pudo encender o apagar la moto) */

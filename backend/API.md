@@ -99,6 +99,25 @@ Consulta el historial de notificaciones y recordatorios emitidos para un cliente
 ### POST `/jobs/run`
 Ejecuta todos los procesos automáticos (marca de mora, cobro automático y apagado por mora) desde un usuario admin para demostraciones.
 
+## HU-14 — Verificación automática de pagos (pasarela)
+
+La pasarela (formato de eventos tipo Wompi) avisa cada transacción al webhook. El sistema valida la firma, concilia el pago contra la cuota por su referencia (`ML-<cuotaId>`) y actualiza al cliente sin intervención manual.
+
+### POST `/webhooks/pasarela`
+Sin JWT y solo si `PASARELA_EVENTS_SECRET` está configurado (si no, 503): se valida `signature.checksum = SHA256(valores de signature.properties + timestamp + PASARELA_EVENTS_SECRET)`.
+
+- **Aprobada** y el monto coincide con la cuota: crea el pago `APROBADO` (`metodoPago: pasarela`), marca la cuota pagada, descuenta el saldo, actualiza el score y, si ya no hay cuotas vencidas, el cliente queda al día y se enciende la moto.
+- **Rechazada / anulada / no encontrada:** el saldo y la mora no cambian; se notifica al cliente y al admin.
+- **Monto distinto o cuota ya pagada:** queda `REVISION` para el admin.
+- El mismo evento reenviado no se aplica dos veces.
+
+Variables: `PASARELA_EVENTS_SECRET` (secreto de eventos), `PASARELA_API_URL` y `PASARELA_PRIVATE_KEY` (opcionales: confirma la transacción consultando la API de la pasarela), `PASARELA_SIMULACION=false` en producción.
+
+### POST `/pagos/pasarela/simular` (admin, solo en simulación)
+`{ "cuotaId": "...", "estado": "APPROVED" | "DECLINED" }` genera un evento firmado de prueba.
+
+### GET `/pagos/pasarela/transacciones?clienteId=` (admin)
+
 ## HU-17 — Apagado automático
 
 El job revisa la mora máxima de cada contrato. Si alcanza `AUTO_SHUTDOWN_MORA_DAYS` (7 por defecto), cambia el GPS a `apagado` y registra el comando como `system-auto`.

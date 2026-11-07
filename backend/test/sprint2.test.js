@@ -10,6 +10,7 @@ process.env.MOTOLEASING_DB_FILE = path.join(testDirectory, 'db.json');
 process.env.MOTOLEASING_UPLOAD_DIR = path.join(testDirectory, 'uploads');
 process.env.JWT_SECRET = 'test-secret-not-for-production';
 delete process.env.N8N_WEBHOOK_URL;
+process.env.PASARELA_EVENTS_SECRET = 'test-pasarela-secret';
 
 const { app } = require('../src/server');
 const { writeDb, readDb } = require('../src/db');
@@ -459,6 +460,67 @@ describe('HU-20 - Alerta de fallo en el control remoto', () => {
     assert.equal(response.status, 200);
     const { payload: despues } = await api('/api/alertas/fallos');
     assert.equal(despues.data.length, 0);
+  });
+});
+
+describe('HU-14 - Verificación automática de pagos (pasarela)', () => {
+  const { construirEvento } = require('../src/pasarela');
+  const enMora = () => {
+    const db = readDb();
+    db.cuotas[0] = { ...db.cuotas[0], estado: 'vencido', fechaVencimiento: isoDate(-10), diasMorosidad: 10 };
+    db.motocicletas[0].estadoGPS = 'apagado';
+    writeDb(db);
+  };
+  const webhook = body => api('/api/webhooks/pasarela', { method: 'POST', token: null, body });
+  const transaccion = (extra = {}) => ({ id: `tx-${Math.random()}`, reference: 'ML-cuota-1', status: 'APPROVED', amount_in_cents: 10000, currency: 'COP', payment_method_type: 'PSE', ...extra });
+
+  test('CP-HU14-01: concilia un pago aprobado y deja al cliente al día', async () => {
+    enMora();
+    const evento = construirEvento(transaccion());
+    const { response, payload } = await webhook(evento);
+    assert.equal(response.status, 200);
+    assert.equal(payload.data.resultado, 'APLICADO');
+    assert.equal(payload.data.alDia, true);
+    const db = readDb();
+    assert.equal(db.cuotas[0].estado, 'pagado');
+    assert.equal(db.cuotas[0].diasMorosidad, 0);
+    assert.equal(db.contratos[0].saldoPendiente, 300);
+    assert.equal(db.contratos[0].cuotasPagadas, 1);
+    assert.equal(db.pagos[0].estado, 'APROBADO');
+    assert.equal(db.pagos[0].metodoPago, 'pasarela');
+    assert.equal(db.motocicletas[0].estadoGPS, 'encendido');
+    assert.ok(db.notificaciones.some(n => n.clienteId === 'c1' && n.titulo === 'Pago confirmado'));
+    // La pasarela reenvía el mismo evento: no se aplica dos veces
+    const { payload: repetido } = await webhook(evento);
+    assert.equal(repetido.data.duplicada, true);
+    assert.equal(readDb().contratos[0].saldoPendiente, 300);
+    assert.equal(readDb().pagos.length, 1);
+  });
+
+  test('CP-HU14-02: un pago rechazado o no encontrado mantiene el saldo y la mora y notifica el fallo', async () => {
+    enMora();
+    const { payload } = await webhook(construirEvento(transaccion({ status: 'DECLINED' })));
+    assert.equal(payload.data.resultado, 'RECHAZADA');
+    const { payload: noExiste } = await webhook(construirEvento(transaccion({ reference: 'ML-no-existe' })));
+    assert.equal(noExiste.data.resultado, 'NO_ENCONTRADA');
+    const db = readDb();
+    assert.equal(db.contratos[0].saldoPendiente, 400);
+    assert.equal(db.cuotas[0].estado, 'vencido');
+    assert.equal(db.motocicletas[0].estadoGPS, 'apagado');
+    assert.equal(db.pagos.length, 0);
+    assert.ok(db.notificaciones.some(n => n.clienteId === 'c1' && n.tipo === 'pago_fallido'));
+    assert.equal(db.notificaciones.filter(n => n.destinatario === 'admin' && n.tipo === 'fallo_pago').length, 2);
+  });
+
+  test('Flujo alternativo: rechaza eventos con firma inválida y montos que no coinciden van a revisión', async () => {
+    const evento = construirEvento(transaccion());
+    evento.data.transaction.amount_in_cents = 1;
+    const { response, payload } = await webhook(evento);
+    assert.equal(response.status, 401);
+    assert.equal(payload.error, 'La firma del evento de la pasarela no es válida');
+    const { payload: parcial } = await webhook(construirEvento(transaccion({ amount_in_cents: 5000 })));
+    assert.equal(parcial.data.resultado, 'REVISION');
+    assert.equal(readDb().contratos[0].saldoPendiente, 400);
   });
 });
 
