@@ -40,3 +40,11 @@ npm run quality       # ESLint + TypeScript + pruebas + build
 ```
 
 La estrategia, matriz de trazabilidad y guion de la demo están en [`docs/Estrategia-Pruebas-Automaticas-Sprint-2.md`](docs/Estrategia-Pruebas-Automaticas-Sprint-2.md).
+
+## Aplicación desplegada
+
+- **App:** http://34.16.32.254
+- **API:** http://34.16.32.254/api
+- **Documentación del despliegue:** [link a esta página de la wiki]
+
+Credenciales de prueba: `admin@motoleasing.com` / `admin123` y `rider@gmail.com` / `rider123`.
