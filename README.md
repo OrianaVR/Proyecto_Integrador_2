@@ -45,6 +45,6 @@ La estrategia, matriz de trazabilidad y guion de la demo están en [`docs/Estrat
 
 - **App:** http://34.16.32.254
 - **API:** http://34.16.32.254/api
-- **Documentación del despliegue:** [link a esta página de la wiki]
+- **Documentación del despliegue:** [https://github.com/OrianaVR/Proyecto_Integrador_2/wiki/Sprint3#despliegue-de-la-aplicaci%C3%B3n]
 
 Credenciales de prueba: `admin@motoleasing.com` / `admin123` y `rider@gmail.com` / `rider123`.
